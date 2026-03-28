@@ -13,8 +13,8 @@ module CLIO_VIDEO
 	
 	input              VCE_R,
 	input              VCE_F,
-	input              HS_N,
-	input              VS_N,
+	input              HSYNC_N,
+	input              VSYNC_N,
 	
 	output     [10: 0] HCNT,
 	output     [ 8: 0] VCNT,
@@ -37,15 +37,15 @@ module CLIO_VIDEO
 	bit  [ 2: 0] HSTART;
 	bit  [ 6: 0] INFO;
 	always @(posedge CLK or negedge RST_N) begin
-		bit          HS_N_OLD;
+		bit          HSYNC_N_OLD;
 		bit          CHS;
 		
 		if (!RST_N) begin
 			HSTART <= '0;
 		end
 		else if (EN && VCE_R) begin
-			HS_N_OLD <= HS_N;
-			CHS = HS_N & ~HS_N_OLD;
+			HSYNC_N_OLD <= HSYNC_N;
+			CHS = HSYNC_N & ~HSYNC_N_OLD;
 			
 			HSTART <= {HSTART[1:0],CHS};			
 			INFO <= {INFO[5:0],HSTART[2]};
@@ -56,24 +56,24 @@ module CLIO_VIDEO
 	bit  [ 8: 0] VCOUNT;
 	bit          FIELD;
 	always @(posedge CLK or negedge RST_N) begin
-		bit          VS_N_OLD;
+		bit          VSYNC_N_OLD;
 		
 		if (!RST_N) begin
 			HCOUNT <= '0;
 			VCOUNT <= '0;
 			FIELD <= 0;
-			VS_N_OLD <= 1;
+			VSYNC_N_OLD <= 1;
 		end
 		else if (EN && VCE_R) begin
 			HCOUNT <= HCOUNT + 11'd1;
 			if (HSTART[2]) begin
 				HCOUNT <= '0;
 				VCOUNT <= VCOUNT + 9'd1;
-				if (!VS_N && VS_N_OLD) begin
+				if (!VSYNC_N && VSYNC_N_OLD) begin
 					VCOUNT <= '0;
 					FIELD <= ~FIELD;
 				end
-				VS_N_OLD <= VS_N;
+				VSYNC_N_OLD <= VSYNC_N;
 			end
 		end
 	end 
@@ -97,11 +97,12 @@ module CLIO_VIDEO
 	assign FLD = FIELD;
 	
 	
-	bit          READ_EN;
+	bit          READ_START,READ_EN;
 	bit          COPY_EN;
 	bit          WRITE_EN;
 	always @(posedge CLK or negedge RST_N) begin
 		if (!RST_N) begin
+			READ_START <= 0;
 			READ_EN <= 0;
 			COPY_EN <= 0;
 			WRITE_EN <= 0;
@@ -110,7 +111,12 @@ module CLIO_VIDEO
 			if (HSTART[2]) begin
 //				WRITE_EN <= 0;
 			end else begin
+				if (HCOUNT == 11'd10 - 1) begin
+					READ_START <= 1;
+				end
+				
 				if (HCOUNT == 11'd11 - 1) begin
+					READ_START <= 0;
 					READ_EN <= 1;
 				end
 				if (HCOUNT == 11'd1293 - 1) begin
@@ -206,7 +212,7 @@ module CLIO_VIDEO
 					AMYCTL <= SCAP[9:0];
 				end
 				if (!SCAP[29] && SCAP[30] && SCAP[31]) begin
-					DISPCTL <= SCAP[29:0];
+					DISPCTL <= SCAP[28:0];
 				end
 			end
 		end
@@ -329,7 +335,8 @@ module CLIO_VIDEO
 		else if (EN && VCE_R) begin
 			if (!CAPEND2_N) begin
 				BYPASS_EN <= (DISPCTL.BYPASS && INPUT[15]) /*|| DISPCTL[12]*/;
-				BYPASS_OUTPUT <= {INPUT[14:10],INPUT[14:12],INPUT[9:5],INPUT[9:7],INPUT[4:0],INPUT[4:2]};
+				BYPASS_OUTPUT <= {INPUT[14:10],INPUT[12:10],INPUT[9:5],INPUT[7:5],INPUT[4:0],INPUT[2:0]};
+//				BYPASS_OUTPUT <= {INPUT[14:10],INPUT[14:12],INPUT[9:5],INPUT[9:7],INPUT[4:0],INPUT[4:2]};
 			end
 		end
 	end 
@@ -373,7 +380,7 @@ module CLIO_VIDEO
 	wire PDS_CLK1 = ~CAPEND5_N & ~CAPEN_DIV;
 	wire PDS_CLK2 = ~CAPEND7_N &  CAPEN_DIV;
 	bit  [23: 0] LP0,LP1,LP2,LP3;
-	CLIO_24DESTACKER PDESTACKER(CLK, VCE_R, EN, PDS_CLK1, PDS_CLK2, RGB, LP0, LP1, LP2, LP3);
+	CLIO_24DESTACKER PDESTACKER(CLK, VCE_R, EN, READ_START, PDS_CLK1, PDS_CLK2, RGB, LP0, LP1, LP2, LP3);
 	
 	bit  [23: 0] INTERPOL_OUT;
 	CLIO_INTERPOL INTERPOL
@@ -405,6 +412,8 @@ module CLIO_24DESTACKER (
 	input             CE,
 	input             EN,
 	
+	input             INIT,
+	
 	input             CLK1,
 	input             CLK2,
 	
@@ -418,6 +427,10 @@ module CLIO_24DESTACKER (
 	reg [23:0] LATCH0,LATCH1,LATCH2,LATCH3,LATCH4;
 	always @(posedge CLK) begin
 		if (EN && CE) begin
+			if (INIT) begin
+				{LATCH0,LATCH1,LATCH2,LATCH3,LATCH4} <= '0;
+			end
+			
 			if (CLK1) begin
 				LATCH4 <= IN;
 			end

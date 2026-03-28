@@ -25,6 +25,8 @@ module CLIO
 	input              MCLK_PH1,
 	input              MCLK_PH2,
 	input      [15: 2] A,
+	input      [31: 0] CPU_DI,
+	
 	input      [31: 0] DI,
 	output reg [31: 0] DO,
 	input      [ 2: 0] CLC,
@@ -51,8 +53,8 @@ module CLIO
 	
 	input              VCE_R,
 	input              VCE_F,
-	input              HS_N,
-	input              VS_N,
+	input              HSYNC_N,
+	input              VSYNC_N,
 	
 	input      [31: 0] S,
 	input              LPSC_N,
@@ -165,11 +167,6 @@ module CLIO
 	bit          VINT0_ACK,VINT1_ACK;
 	bit          TMINT_REQ[8];
 	
-	bit  [31: 0] DI_FF;
-	always @(posedge CLK) begin
-		DI_FF <= DI;
-	end
-	
 	wire CONTROL_SEL = (A >= (16'h0000>>2) && A <= (16'h003F>>2));
 	wire INTERRUPT_SEL = (A >= (16'h0040>>2) && A <= (16'h00FF>>2));
 	wire TIMER_SEL = (A >= (16'h0100>>2) && A <= (16'h017F>>2));
@@ -209,6 +206,7 @@ module CLIO
 			INT1_EN <= '0;
 			HDELAY <= '0;
 			UNCLE_BITS <= '0;
+			{ADBIO_D,ADBIO_O} <= '0;
 			
 			IO_ST <= IO_IDLE;
 			IO_XBUS_RD <= 0;
@@ -247,6 +245,7 @@ module CLIO
 			INT1_EN <= '0;
 			HDELAY <= '0;
 			UNCLE_BITS <= '0;
+			{ADBIO_D,ADBIO_O} <= '0;
 			
 			IO_ST <= IO_IDLE;
 			IO_XBUS_RD <= 0;
@@ -320,54 +319,54 @@ module CLIO
 						if (CLC == 3'h1 && !INFO_CODE /*&& MCLK_PH1*/) begin	//CPU write
 							if (CONTROL_SEL) begin
 								case ({A[5:2],2'b00})
-									6'h08: VINT0 <= DI_FF[10:0];
-									6'h0C: VINT1 <= DI_FF[10:0];
-									6'h28: begin CSTAT <= DI_FF; CSTAT[6] <= DI_FF[5]; end
+									6'h08: VINT0 <= CPU_DI[10:0];
+									6'h0C: VINT1 <= CPU_DI[10:0];
+									6'h28: begin CSTAT <= CPU_DI; CSTAT[6] <= CPU_DI[5]; end
 									default:;
 								endcase
 								IO_ST <= IO_IDLE;
 								
-								if ({A[5:2],2'b00} == 6'h0C && DI_FF[10:0] == 11'h7FF) DBG_VINT1_CNT <= DBG_VINT1_CNT + 1'd1;
-								if ({A[5:2],2'b00} == 6'h28 && DI_FF[5]) DBG_VINT1_CNT <= '0;
+								if ({A[5:2],2'b00} == 6'h0C && CPU_DI[10:0] == 11'h7FF) DBG_VINT1_CNT <= DBG_VINT1_CNT + 1'd1;
+								if ({A[5:2],2'b00} == 6'h28 && CPU_DI[5]) DBG_VINT1_CNT <= '0;
 							end
 							else if (INTERRUPT_SEL) begin
 								case ({A[7:2],2'b00})
-									8'h40: INT0_PEND <= INT0_PEND | DI_FF;
-									8'h44: INT0_PEND <= INT0_PEND & ~DI_FF;
-									8'h48: INT0_EN <= INT0_EN | DI_FF;
-									8'h4C: INT0_EN <= INT0_EN & ~DI_FF;
-									8'h50: INT_MODE <= INT_MODE | DI_FF;
-									8'h54: INT_MODE <= INT_MODE & ~DI_FF;
-									8'h60: INT1_PEND <= INT1_PEND | DI_FF;
-									8'h64: INT1_PEND <= INT1_PEND & ~DI_FF;
-									8'h68: INT1_EN <= INT1_EN | DI_FF;
-									8'h6C: INT1_EN <= INT1_EN & ~DI_FF;
-									8'h80: HDELAY <= DI_FF;
-									8'h84: {ADBIO_D,ADBIO_O} <= DI_FF[7:0];
+									8'h40: INT0_PEND <= INT0_PEND | CPU_DI;
+									8'h44: INT0_PEND <= INT0_PEND & ~CPU_DI;
+									8'h48: INT0_EN <= INT0_EN | CPU_DI;
+									8'h4C: INT0_EN <= INT0_EN & ~CPU_DI;
+									8'h50: INT_MODE <= INT_MODE | CPU_DI;
+									8'h54: INT_MODE <= INT_MODE & ~CPU_DI;
+									8'h60: INT1_PEND <= INT1_PEND | CPU_DI;
+									8'h64: INT1_PEND <= INT1_PEND & ~CPU_DI;
+									8'h68: INT1_EN <= INT1_EN | CPU_DI;
+									8'h6C: INT1_EN <= INT1_EN & ~CPU_DI;
+									8'h80: HDELAY <= CPU_DI;
+									8'h84: {ADBIO_D,ADBIO_O} <= CPU_DI[7:0];
 									default:;
 								endcase
 								IO_ST <= IO_IDLE;
 							end
 							else if (TIMER_SEL) begin
-								if (!A[2]) TM_CNT[A[6:3]] <= DI_FF[15:0];
-								else       TM_RELOAD[A[6:3]] <= DI_FF[15:0];
+								if (!A[2]) TM_CNT[A[6:3]] <= CPU_DI[15:0];
+								else       TM_RELOAD[A[6:3]] <= CPU_DI[15:0];
 								IO_ST <= IO_IDLE;
 							end
 							else if (TIMER_CTRL_SEL) begin
 								case ({A[7:2],2'b00})
-									8'h00: {TM_CTRL[ 7],TM_CTRL[ 6],TM_CTRL[ 5],TM_CTRL[ 4],TM_CTRL[ 3],TM_CTRL[ 2],TM_CTRL[ 1],TM_CTRL[ 0]} <= {TM_CTRL[ 7],TM_CTRL[ 6],TM_CTRL[ 5],TM_CTRL[ 4],TM_CTRL[ 3],TM_CTRL[ 2],TM_CTRL[ 1],TM_CTRL[ 0]} |  DI_FF;
-									8'h04: {TM_CTRL[ 7],TM_CTRL[ 6],TM_CTRL[ 5],TM_CTRL[ 4],TM_CTRL[ 3],TM_CTRL[ 2],TM_CTRL[ 1],TM_CTRL[ 0]} <= {TM_CTRL[ 7],TM_CTRL[ 6],TM_CTRL[ 5],TM_CTRL[ 4],TM_CTRL[ 3],TM_CTRL[ 2],TM_CTRL[ 1],TM_CTRL[ 0]} & ~DI_FF;
-									8'h08: {TM_CTRL[15],TM_CTRL[14],TM_CTRL[13],TM_CTRL[12],TM_CTRL[11],TM_CTRL[10],TM_CTRL[ 9],TM_CTRL[ 8]} <= {TM_CTRL[15],TM_CTRL[14],TM_CTRL[13],TM_CTRL[12],TM_CTRL[11],TM_CTRL[10],TM_CTRL[ 9],TM_CTRL[ 8]} |  DI_FF;
-									8'h0C: {TM_CTRL[15],TM_CTRL[14],TM_CTRL[13],TM_CTRL[12],TM_CTRL[11],TM_CTRL[10],TM_CTRL[ 9],TM_CTRL[ 8]} <= {TM_CTRL[15],TM_CTRL[14],TM_CTRL[13],TM_CTRL[12],TM_CTRL[11],TM_CTRL[10],TM_CTRL[ 9],TM_CTRL[ 8]} & ~DI_FF;
+									8'h00: {TM_CTRL[ 7],TM_CTRL[ 6],TM_CTRL[ 5],TM_CTRL[ 4],TM_CTRL[ 3],TM_CTRL[ 2],TM_CTRL[ 1],TM_CTRL[ 0]} <= {TM_CTRL[ 7],TM_CTRL[ 6],TM_CTRL[ 5],TM_CTRL[ 4],TM_CTRL[ 3],TM_CTRL[ 2],TM_CTRL[ 1],TM_CTRL[ 0]} |  CPU_DI;
+									8'h04: {TM_CTRL[ 7],TM_CTRL[ 6],TM_CTRL[ 5],TM_CTRL[ 4],TM_CTRL[ 3],TM_CTRL[ 2],TM_CTRL[ 1],TM_CTRL[ 0]} <= {TM_CTRL[ 7],TM_CTRL[ 6],TM_CTRL[ 5],TM_CTRL[ 4],TM_CTRL[ 3],TM_CTRL[ 2],TM_CTRL[ 1],TM_CTRL[ 0]} & ~CPU_DI;
+									8'h08: {TM_CTRL[15],TM_CTRL[14],TM_CTRL[13],TM_CTRL[12],TM_CTRL[11],TM_CTRL[10],TM_CTRL[ 9],TM_CTRL[ 8]} <= {TM_CTRL[15],TM_CTRL[14],TM_CTRL[13],TM_CTRL[12],TM_CTRL[11],TM_CTRL[10],TM_CTRL[ 9],TM_CTRL[ 8]} |  CPU_DI;
+									8'h0C: {TM_CTRL[15],TM_CTRL[14],TM_CTRL[13],TM_CTRL[12],TM_CTRL[11],TM_CTRL[10],TM_CTRL[ 9],TM_CTRL[ 8]} <= {TM_CTRL[15],TM_CTRL[14],TM_CTRL[13],TM_CTRL[12],TM_CTRL[11],TM_CTRL[10],TM_CTRL[ 9],TM_CTRL[ 8]} & ~CPU_DI;
 									default:;
 								endcase
 								IO_ST <= IO_IDLE;
 							end
 							else if (FIFO_SEL) begin
 								case ({A[7:2],2'b00})
-									8'h00: begin FIFOINIT <= DI_FF; DMAEN <= DMAEN & ~DI_FF; end
-									8'h04: DMAEN <= DMAEN | DI_FF;
-									8'h08: DMAEN <= DMAEN & ~DI_FF;
+									8'h00: begin FIFOINIT <= CPU_DI; DMAEN <= DMAEN & ~CPU_DI; end
+									8'h04: DMAEN <= DMAEN | CPU_DI;
+									8'h08: DMAEN <= DMAEN & ~CPU_DI;
 									default:;
 								endcase
 								IO_ST <= IO_IDLE;
@@ -383,7 +382,7 @@ module CLIO
 									8'hD4: DSP_SEMA_ACK <= 1;
 									8'hE4: DSP_RST <= 2'b01;
 									8'hE8: DSP_RST <= 2'b11;
-									8'hFC: DSP_GW <= DI_FF[0];
+									8'hFC: DSP_GW <= CPU_DI[0];
 									default:;
 								endcase
 								IO_ST <= IO_IDLE;
@@ -406,7 +405,7 @@ module CLIO
 							end
 							else if (UNCLE_SEL) begin
 								case ({A[3:2],2'b00})
-									4'h4: UNCLE_BITS <= DI_FF;
+									4'h4: UNCLE_BITS <= CPU_DI;
 									4'h8: ;
 									4'hC: ;
 									default:;
@@ -468,7 +467,7 @@ module CLIO
 				
 				endcase
 				IO_A_LATCH <= A[10:2];
-				IO_DI_LATCH <= DI_FF;
+				IO_DI_LATCH <= CPU_DI;
 				DSP_DO_LATCH <= DSP_DO;
 				
 				//Interrupts
@@ -841,7 +840,7 @@ module CLIO
 		end
 	end
 	wire [ 8: 0] DSP_ADDR = DSP_NRAM32_WE || DSP_EIRAM32_WE ? {IO_A_LATCH[9:2],1'b1} : (DSP_ACCESS_32 ? {A[9:2],1'b0} : A[10:2]);
-	wire [15: 0] DSP_DI   = DSP_NRAM32_WE || DSP_EIRAM32_WE ? IO_DI_LATCH[15:0]      : (DSP_ACCESS_32 ? DI_FF[31:16]  : DI_FF[15:0]);
+	wire [15: 0] DSP_DI   = DSP_NRAM32_WE || DSP_EIRAM32_WE ? IO_DI_LATCH[15:0]      : (DSP_ACCESS_32 ? CPU_DI[31:16]  : CPU_DI[15:0]);
 	wire         DSP_NRAM_WE = DSP_NRAM32_WE || (DSP_NRAM32_SEL && IO_ST == IO_DSP_WRITE) || (DSP_NRAM16_SEL && IO_ST == IO_DSP_WRITE);
 	wire         DSP_EIRAM_WE = DSP_EIRAM32_WE || (DSP_EIRAM32_SEL && IO_ST == IO_DSP_WRITE) || (DSP_EIRAM16_SEL && IO_ST == IO_DSP_WRITE);
 	
@@ -1112,7 +1111,7 @@ module CLIO
 				DSP_SEMAPHORE_STAT[1] <= 1;
 			end
 			else if (DSP_SEMA_WE) begin
-				DSP_SEMAPHORE <= DI_FF[15:0];
+				DSP_SEMAPHORE <= CPU_DI[15:0];
 				DSP_SEMAPHORE_STAT <= '0;
 				DSP_SEMAPHORE_STAT[3] <= 1;
 			end
@@ -1372,8 +1371,8 @@ module CLIO
 		
 		.VCE_R(VCE_R),
 		.VCE_F(VCE_F),
-		.HS_N(HS_N),
-		.VS_N(VS_N),
+		.HSYNC_N(HSYNC_N),
+		.VSYNC_N(VSYNC_N),
 		
 		.HCNT(HCNT),
 		.VCNT(VCNT),
