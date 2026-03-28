@@ -13,6 +13,7 @@ module MADAM_SE
 	input              CE_R,
 	input              CE_F,
 	
+	input      [31: 0] CPU_DI,
 	input      [23: 2] MADR,
 	input      [31: 0] MDTI,
 	output     [31: 0] MDTO,
@@ -20,7 +21,7 @@ module MADAM_SE
 	input              SEL,
 	input BusState_t   BUS_STATE,
 	input              GRANT,
-	input              DMA_REG_OVF,
+	input              DMA_REG_ZERO,
 	output AddrGenCtl_t AG_CTL,
 	output     [23: 1] LEFT_ADDR,
 	output     [23: 1] RIGHT_ADDR,
@@ -94,9 +95,7 @@ module MADAM_SE
 	wire CTRL_SEL = SEL && MADR[7:2] >= (8'h00>>2) && MADR[7:2] <= (8'h3F>>2);//Sprite engine control
 	wire PM_SEL = SEL && MADR[7:2] >= (8'h40>>2) && MADR[7:2] <= (8'h7F>>2);//Points mapper
 	wire PLUT_SEL = SEL && MADR[7:2] >= (8'h80>>2) && MADR[7:2] <= (8'hFF>>2);//PLUT
-	always @(posedge CLK or negedge RST_N) begin
-		bit [31: 0] MDTI_FF;
-		
+	always @(posedge CLK or negedge RST_N) begin		
 		if (!RST_N) begin
 			SCOBCTL <= SCoBCtl_INIT;
 			REGCTL0 <= RegCtl0_INIT;
@@ -107,16 +106,15 @@ module MADAM_SE
 //			PPMPCB <= PPMPCx_INIT;
 		end
 		else begin
-			MDTI_FF <= MDTI;
 			if (CE_R) begin
 				if (CTRL_SEL && MWR) begin
 					case ({MADR[7:2],2'b00})
-						8'h10: SCOBCTL <= MDTI_FF & SCoBCtl_WMASK;
-	//					8'h20: {PPMPCB,PPMPCA} <= MDTI_FF & {PPMPCx_WMASK,PPMPCx_WMASK};
-						8'h30: REGCTL0 <= MDTI_FF & RegCtl0_WMASK;
-						8'h34: REGCTL1 <= MDTI_FF & RegCtl1_WMASK;
-						8'h38: REGCTL2 <= MDTI_FF & RegCtl2_WMASK;
-						8'h3C: REGCTL3 <= MDTI_FF & RegCtl3_WMASK;
+						8'h10: SCOBCTL <= CPU_DI & SCoBCtl_WMASK;
+	//					8'h20: {PPMPCB,PPMPCA} <= CPU_DI & {PPMPCx_WMASK,PPMPCx_WMASK};
+						8'h30: REGCTL0 <= CPU_DI & RegCtl0_WMASK;
+						8'h34: REGCTL1 <= CPU_DI & RegCtl1_WMASK;
+						8'h38: REGCTL2 <= CPU_DI & RegCtl2_WMASK;
+						8'h3C: REGCTL3 <= CPU_DI & RegCtl3_WMASK;
 						default:;
 					endcase
 				end
@@ -204,8 +202,8 @@ module MADAM_SE
 	wire [ 9: 0] LINE_LAST = SCOB_PRE0.VCNT;
 	wire         SPRDATA_ACK = (BUS_STATE_FF == SPR_INIT0 || (BUS_STATE_FF == SPR_INIT2));
 	wire         SPRDRAW_ACK = (BUS_STATE_FF == CFB_INIT0);
-	wire         SPRDATA_LAST = (PDATA_FETCH && DMA_REG_OVF);
-	wire         SPRDATA_BURST_LAST = (BUS_STATE_FF == SPR_OFFS3 || (BUS_STATE_FF == SPR_DATA1 && BURST_LAST) || (BUS_STATE_FF == SPR_DATA1 && DMA_REG_OVF) /*|| BUS_STATE_FF == CFB_WRITE1*/);
+	wire         SPRDATA_LAST = ((BUS_STATE_FF == SPR_OFFS3 || BUS_STATE_FF == SPR_CALC1 || BUS_STATE_FF == SPR_DATA1) && DMA_REG_ZERO);
+	wire         SPRDATA_BURST_LAST = (BUS_STATE_FF == SPR_OFFS3 || (BUS_STATE_FF == SPR_DATA1 && BURST_LAST) || (BUS_STATE_FF == SPR_DATA1 && DMA_REG_ZERO) /*|| BUS_STATE_FF == CFB_WRITE1*/);
 	always @(posedge CLK or negedge RST_N) begin
 		bit          SPRSTRT_WRITE_OLD,SPRCNTU_WRITE_OLD,SPRPAUS_WRITE_OLD;
 		bit  [ 1: 0] SPRDATA_DELAY;
@@ -1227,7 +1225,7 @@ module MADAM_SE
 				
 		CLIPX_A = ($signed(MATH_A_XL) > $signed({1'b0,REGCTL1.CLIPX}) && $signed(MATH_A_XR) > $signed({1'b0,REGCTL1.CLIPX})) || ($signed(MATH_A_XL) < 0 && $signed(MATH_A_XR) < 0);
 		CLIPY_A = $signed(Y_A) > $signed(REGCTL1.CLIPY) || $signed(Y_A) < 0;
-		REGIS_A_START = (CRNA_ST == CRN_CALC && !UNPACKER_A_EOL && !MATH_A_STAT.NP && !MATH_A_STAT.MF && !MATH_A_STAT.RC/*&& !CLIPX_A && !CLIPY_A*/);
+		REGIS_A_START = (CRNA_ST == CRN_CALC && !UNPACKER_A_EOL && !MATH_A_STAT.NP && !(MATH_A_STAT.MF || SCOB_FLAG.MARIA) && !MATH_A_STAT.RC);
 		REGIS_A_TERMINATE = ($signed(MATH_A_Y) > $signed(REGCTL1.CLIPY)) && SCOBCTL.ASCALL;
 	end
 	bit          REGIS_A_LF_REQ;
@@ -1257,7 +1255,7 @@ module MADAM_SE
 				
 		CLIPX_B = ($signed(MATH_B_XL) > $signed({1'b0,REGCTL1.CLIPX}) && $signed(MATH_B_XR) > $signed({1'b0,REGCTL1.CLIPX})) || ($signed(MATH_B_XL) < 0 && $signed(MATH_B_XR) < 0);
 		CLIPY_B = $signed(Y_B) > $signed(REGCTL1.CLIPY) || $signed(Y_B) < 0;
-		REGIS_B_START = (CRNB_ST == CRN_CALC && !UNPACKER_B_EOL && !MATH_B_STAT.NP && !MATH_B_STAT.MF && !MATH_B_STAT.RC /*&& !CLIPX_B && !CLIPY_B*/);
+		REGIS_B_START = (CRNB_ST == CRN_CALC && !UNPACKER_B_EOL && !MATH_B_STAT.NP && !(MATH_B_STAT.MF || SCOB_FLAG.MARIA) && !MATH_B_STAT.RC);
 		REGIS_B_TERMINATE = ($signed(MATH_B_Y) > $signed(REGCTL1.CLIPY)) && SCOBCTL.ASCALL;
 	end
 	bit          REGIS_B_LF_REQ;
@@ -1355,7 +1353,7 @@ module MADAM_SE
 					if (UNPACKER_A_EOL)
 						CRNA_ST <= CRN_END;
 					else if (UNPACKER_A_READY && (CRNB_ST == CRN_CALC || !LRFORM)) begin
-						if (MATH_A_STAT.MF) begin
+						if (MATH_A_STAT.MF || SCOB_FLAG.MARIA) begin
 							REGIS_A_Y <= MATH_A_Y;
 							CRNA_ST <= !MATH_A_STAT.RC ? CRN_OUT : CRN_CALC;
 						end else if (!REGIS_A_START) begin
@@ -1390,13 +1388,13 @@ module MADAM_SE
 						if ($signed(MATH_A_XR) < $signed(MATH_A_XL) && $signed(MATH_A_XL) > 0) begin
 							X1_A_CLIPPED = !MATH_A_XR[11] ? MATH_A_XR : '0;
 							X2_A_CLIPPED = $signed(MATH_A_XL) <= {1'b0,REGCTL1.CLIPX} ? $signed(MATH_A_XL) - 12'd1 : {1'b0,REGCTL1.CLIPX};
-							if ($signed(X2_A_CLIPPED) != $signed(X1_A_CLIPPED)) begin LF_A_RUN <= SCOB_FLAG.ACCW; end
+							if ($signed(X2_A_CLIPPED) != $signed(X1_A_CLIPPED)) begin LF_A_RUN <= SCOB_FLAG.ACCW & ~SCOB_FLAG.MARIA; end
 							else begin LF_A_LAST <= UNPACKER_A_EOL && REGIS_A_DONE; end
 							LF_A_REQ <= SCOB_FLAG.ACCW;
 						end else if ($signed(MATH_A_XR) > $signed(MATH_A_XL) && $signed(MATH_A_XR) > 0) begin
 							X1_A_CLIPPED = !MATH_A_XL[11] ? MATH_A_XL : '0;
 							X2_A_CLIPPED = $signed(MATH_A_XR) <= {1'b0,REGCTL1.CLIPX} ? $signed(MATH_A_XR) - 12'd1 : {1'b0,REGCTL1.CLIPX};
-							if ($signed(X1_A_CLIPPED) != $signed(X2_A_CLIPPED)) begin LF_A_RUN <= SCOB_FLAG.ACW; end
+							if ($signed(X1_A_CLIPPED) != $signed(X2_A_CLIPPED)) begin LF_A_RUN <= SCOB_FLAG.ACW & ~SCOB_FLAG.MARIA; end
 							else begin LF_A_LAST <= UNPACKER_A_EOL && REGIS_A_DONE; end
 							LF_A_REQ <= SCOB_FLAG.ACW;
 						end else begin 
@@ -1498,7 +1496,7 @@ module MADAM_SE
 					if (UNPACKER_B_EOL)
 						CRNB_ST <= CRN_END;
 					else if (UNPACKER_B_READY && (CRNA_ST == CRN_CALC || !LRFORM)) begin
-						if (MATH_B_STAT.MF) begin
+						if (MATH_B_STAT.MF || SCOB_FLAG.MARIA) begin
 							REGIS_B_Y <= MATH_B_Y;
 							CRNB_ST <= !MATH_B_STAT.RC ? CRN_OUT : CRN_CALC;
 						end else if (!REGIS_B_START) begin
@@ -1533,13 +1531,13 @@ module MADAM_SE
 						if ($signed(MATH_B_XR) < $signed(MATH_B_XL) && $signed(MATH_B_XL) > 0) begin
 							X1_B_CLIPPED = !MATH_B_XR[11] ? MATH_B_XR : '0;
 							X2_B_CLIPPED = $signed(MATH_B_XL) <= {1'b0,REGCTL1.CLIPX} ? $signed(MATH_B_XL) - 12'd1 : {1'b0,REGCTL1.CLIPX};
-							if ($signed(X2_B_CLIPPED) != $signed(X1_B_CLIPPED)) begin LF_B_RUN <= SCOB_FLAG.ACCW; end
+							if ($signed(X2_B_CLIPPED) != $signed(X1_B_CLIPPED)) begin LF_B_RUN <= SCOB_FLAG.ACCW & ~SCOB_FLAG.MARIA; end
 							else begin LF_B_LAST <= UNPACKER_B_EOL && REGIS_B_DONE; end
 							LF_B_REQ <= SCOB_FLAG.ACCW;
 						end else if ($signed(MATH_B_XR) > $signed(MATH_B_XL) && $signed(MATH_B_XR) > 0) begin
 							X1_B_CLIPPED = !MATH_B_XL[11] ? MATH_B_XL : '0;
 							X2_B_CLIPPED = $signed(MATH_B_XR) <= {1'b0,REGCTL1.CLIPX} ? $signed(MATH_B_XR) - 12'd1 : {1'b0,REGCTL1.CLIPX};
-							if ($signed(X1_B_CLIPPED) != $signed(X2_B_CLIPPED)) begin LF_B_RUN <= SCOB_FLAG.ACW; end
+							if ($signed(X1_B_CLIPPED) != $signed(X2_B_CLIPPED)) begin LF_B_RUN <= SCOB_FLAG.ACW & ~SCOB_FLAG.MARIA; end
 							else begin LF_B_LAST <= UNPACKER_B_EOL && REGIS_B_DONE; end
 							LF_B_REQ <= SCOB_FLAG.ACW;
 						end else begin 
@@ -1590,8 +1588,8 @@ module MADAM_SE
 	assign CRNA_FINISH = (CRNA_ST == CRN_IDLE && XY_FIFO_A_EMPTY && (CRNB_ST == CRN_IDLE || !LRFORM));
 	assign CRNB_FINISH = (CRNB_ST == CRN_IDLE && XY_FIFO_A_EMPTY && (CRNA_ST == CRN_IDLE || !LRFORM));
 	
-	wire         MUNKEE_A_LF_REQ = (CRNA_ST == CRN_CALC && MATH_A_STAT.MF && UNPACKER_A_READY && (CRNB_ST == CRN_CALC || !LRFORM));
-	wire         MUNKEE_B_LF_REQ = (CRNB_ST == CRN_CALC && MATH_B_STAT.MF && UNPACKER_B_READY && (CRNA_ST == CRN_CALC || !LRFORM));
+	wire         MUNKEE_A_LF_REQ = (CRNA_ST == CRN_CALC && (MATH_A_STAT.MF || SCOB_FLAG.MARIA) && UNPACKER_A_READY && (CRNB_ST == CRN_CALC || !LRFORM));
+	wire         MUNKEE_B_LF_REQ = (CRNB_ST == CRN_CALC && (MATH_B_STAT.MF || SCOB_FLAG.MARIA) && UNPACKER_B_READY && (CRNA_ST == CRN_CALC || !LRFORM));
 	MathCtl_t    REGIS_A_CTL,REGIS_B_CTL;
 	always_comb begin
 		MATH_A_CTL = '0;
@@ -2656,7 +2654,7 @@ module MADAM_SE
 				AG_CTL.DMA_REG_WRITE_EN = 1;
 				AG_CTL.DMA_ADDR_SEL = 1;
 				AG_CTL.DMA_ADDER_CTL = 4'b0001;
-				SPR_SEL[0] = (BURST_LAST|DMA_REG_OVF);
+				SPR_SEL[0] = (BURST_LAST|DMA_REG_ZERO);
 			end
 			
 			//Pixel read/write
@@ -3055,13 +3053,13 @@ module MADAM_PPMP
 				2'b00: PEN_B[0] = 0;
 				2'b01: PEN_B[0] = 1;
 				2'b10: ;
-				2'b11: PEN_B[0] = SPH_PIPE;
+				2'b11: PEN_B[0] = !SCOBCTL.SWAPHV ? SPH_PIPE : SPV_PIPE;
 			endcase
 			case (SCOBCTL.B15POS)
 				2'b00: PEN15 = 0;
 				2'b01: PEN15 = 1;
 				2'b10: PEN15 = 0;//?
-				2'b11: PEN15 = SPV_PIPE;
+				2'b11: PEN15 = !SCOBCTL.SWAPHV ? SPV_PIPE : SPH_PIPE;
 			endcase
 			PEN <= {PEN15,PEN_R,PEN_G,PEN_B};
 		end

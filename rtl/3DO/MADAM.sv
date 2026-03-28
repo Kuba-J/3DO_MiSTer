@@ -13,6 +13,7 @@ module MADAM
 	input      [31: 0] DI,
 	output     [31: 0] DO,
 	
+	input      [31: 0] CPU_DI,
 	input              nRW,
 	input              nWB,
 	input              nMREQ,
@@ -182,11 +183,6 @@ module MADAM
 	//SLOW BUS
 	bit          BOOT_ROM;
 	
-	bit  [31: 0] DI_FF;
-	always @(posedge CLK) begin
-		DI_FF <= DI;
-	end
-	
 	typedef enum bit [2:0] {
 		MATH_IDLE,
 		MATH_MUL_MATRIX,
@@ -243,8 +239,8 @@ module MADAM
 				
 			if (REG_CTRL_SEL && nRW) begin
 				case ({A[7:2],2'b00})
-					8'h04: MSYS <= DI_FF;
-					8'h08: MCTL <= DI_FF;
+					8'h04: MSYS <= CPU_DI;
+					8'h08: MCTL <= CPU_DI;
 					default:;
 				endcase
 			end
@@ -256,11 +252,11 @@ module MADAM
 			
 			if (REG_MATH_SEL && nRW && MCLK_PH2) begin
 				case ({A[3:2],2'b00})
-					4'h0: MATH_CTRL <= MATH_CTRL | DI_FF[3:0];
-					4'h4: MATH_CTRL <= MATH_CTRL & ~DI_FF[3:0];
+					4'h0: MATH_CTRL <= MATH_CTRL | CPU_DI[3:0];
+					4'h4: MATH_CTRL <= MATH_CTRL & ~CPU_DI[3:0];
 					4'hC: begin
-						MATH_MODE <= DI_FF[5:0];
-						MATH_START <= |DI_FF[5:0];
+						MATH_MODE <= CPU_DI[5:0];
+						MATH_START <= |CPU_DI[5:0];
 //						MATH_CTRL[3] <= ~MATH_CTRL[3];
 						MATH_WORK_BANK <= MATH_BANK;
 						MATH_BANK <= ~MATH_BANK;
@@ -270,8 +266,8 @@ module MADAM
 			end
 			if (REG_MATRIX_SEL && nRW && MCLK_PH2) begin
 				case ({A[7:2],2'b00})
-					8'h80: MATH_DIV_N[63:32] <= DI_FF;
-					8'h84: MATH_DIV_N[31: 0] <= DI_FF;
+					8'h80: MATH_DIV_N[63:32] <= CPU_DI;
+					8'h84: MATH_DIV_N[31: 0] <= CPU_DI;
 					default:;
 				endcase
 			end
@@ -363,18 +359,18 @@ module MADAM
 	wire         MATRIX_WE = REG_MATRIX_SEL && A[7:0] <= 8'h3F && nRW && MCLK_PH2;
 	wire [ 3: 0] MATRIX_RA = {MATH_MROW,MATH_MCOL};
 	bit  [31: 0] MATRIX_DO;
-	MADAM_MATH_MATRIX MATH_MATRIX (.CLK(CLK), .WA(A[5:2]), .DIN(DI_FF), .WE(MATRIX_WE & CE_R), .RA(MATRIX_RA), .DOUT(MATRIX_DO));
+	MADAM_MATH_MATRIX MATH_MATRIX (.CLK(CLK), .WA(A[5:2]), .DIN(CPU_DI), .WE(MATRIX_WE & CE_R), .RA(MATRIX_RA), .DOUT(MATRIX_DO));
 	
 	bit  [ 1: 0] VECTOR_N;
 	
 	wire         VECTOR_WE = REG_MATRIX_SEL && A[7:0] >= 8'h40 && A[7:0] <= 8'h4F && nRW && MCLK_PH2;
 	wire [ 1: 0] VECTOR0_RA = !MATH_WORK_BANK && MATH_ON ? MATH_MCOL : A[3:2];
 	bit  [31: 0] VECTOR0_DO;
-	MADAM_MATH_VECTOR MATH_VECTOR0 (.CLK(CLK), .WA(A[3:2]), .DIN(DI_FF), .WE(VECTOR_WE & ~MATH_BANK & CE_R), .RA(VECTOR0_RA), .DOUT(VECTOR0_DO));
+	MADAM_MATH_VECTOR MATH_VECTOR0 (.CLK(CLK), .WA(A[3:2]), .DIN(CPU_DI), .WE(VECTOR_WE & ~MATH_BANK & CE_R), .RA(VECTOR0_RA), .DOUT(VECTOR0_DO));
 	
 	wire [ 1: 0] VECTOR1_RA =  MATH_WORK_BANK && MATH_ON ? MATH_MCOL : A[3:2];
 	bit  [31: 0] VECTOR1_DO;
-	MADAM_MATH_VECTOR MATH_VECTOR1 (.CLK(CLK), .WA(A[3:2]), .DIN(DI_FF), .WE(VECTOR_WE &  MATH_BANK & CE_R), .RA(VECTOR1_RA), .DOUT(VECTOR1_DO));
+	MADAM_MATH_VECTOR MATH_VECTOR1 (.CLK(CLK), .WA(A[3:2]), .DIN(CPU_DI), .WE(VECTOR_WE &  MATH_BANK & CE_R), .RA(VECTOR1_RA), .DOUT(VECTOR1_DO));
 	
 	wire [ 1: 0] MATH_OUT_WA = MATH_RES_ROW;
 	wire [31: 0] MATH_OUT_DIN = MATH_ACC[47:16];
@@ -659,6 +655,7 @@ module MADAM
 		.CE_R(CE_R),
 		.CE_F(CE_F),
 		
+		.CPU_DI(CPU_DI),
 		.MADR(MADR),
 		.MDTI(DI),
 		.MDTO(SE_MDTO),
@@ -666,7 +663,7 @@ module MADAM
 		.SEL(REG_SE_SEL),
 		.BUS_STATE(BUS_STATE),
 		.GRANT(SE_GRANT),
-		.DMA_REG_OVF(AG_REG_OVF),
+		.DMA_REG_ZERO(AG_REG_ZERO),
 		.AG_CTL(SE_AG_CTL),
 		.LEFT_ADDR(SE_LEFT_ADDR),
 		.RIGHT_ADDR(SE_RIGHT_ADDR),
@@ -773,7 +770,7 @@ module MADAM
 		.ADDR(A[31:16]),
 		.WR(nRW),
 		.SEL(CPU_SLOW_SEL & CPU_ACCESS),
-		.MDTI(DI_FF),
+		.MDTI(CPU_DI),
 		.MDTO(SLOW_MDTO),
 		
 		.PDI(PDI),
@@ -848,7 +845,7 @@ module MADAM
 			              A == 32'h000CD214 + 32'h24 ||
 			              A == 32'h000CD094 + 32'h24 ||
 			              A == 32'h000CD294 + 32'h24 ||
-			              A == 32'h000CD054 + 32'h24) && DI_FF[31:16] == 16'h0006 && nRW);
+			              A == 32'h000CD054 + 32'h24) && DI[31:16] == 16'h0006 && nRW);
 	end
 `endif
 
