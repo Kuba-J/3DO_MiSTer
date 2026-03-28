@@ -234,16 +234,22 @@ module emu
 	// 0         1         2         3          4         5         6   
 	// 01234567890123456789012345678901 23456789012345678901234567890123
 	// 0123456789ABCDEFGHIJKLMNOPQRSTUV 0123456789ABCDEFGHIJKLMNOPQRSTUV
-	// XXXXXXXXXXX                                                      
+	// XXXXXXXXXXX XXX                  XXXXXX                          
 	
 	`include "build_id.v"
 	localparam CONF_STR = {
 		"3DO;;",
 		"S0,CUEISO,Insert Disk;",
 		"FS2,BIN,Load bios;",
-		"-;",
-		"OF,Load from CD,No,Yes;",
+//		"-;",
+//		"OF,Load from CD,No,Yes;",
 
+		"-;",
+		"D0RC,Load Backup RAM;",
+		"D0RD,Save Backup RAM;",
+		"D0OE,Autosave,Off,On;",
+		"D0-;",
+		
 		"-;",
 		"P1,Audio & Video;",
 		"P1-;",
@@ -253,12 +259,15 @@ module emu
 		"P1-;",
 		"P1O67,Composite Blend,Off,On,Adaptive;",
 	
-//		"P2,Input;",
-//		"P2-;",
+		"P2,Input;",
+		"P2O[34:32],Pad 1,Digital,Off;",
+		"P2-;",
+		"P2O[37:35],Pad 2,Digital,Off;",
+		"P2-;",
 
-		"P3,Hardware;",
-		"P3-;",
-		"P3O8A,FB offset,H200000,H240000,H260000,H280000,H2A0000;",
+//		"P3,Hardware;",
+//		"P3-;",
+//		"P3O8A,FB offset,H200000,H240000,H260000,H280000,H2A0000;",
 		
 		"-;",
 		"R0,Reset;",
@@ -267,6 +276,8 @@ module emu
 	};
 
 	wire [63:0] status;
+	wire [15:0] status_menumask = {~bk_ena};
+	
 	wire  [1:0] buttons;
 	wire [12:0] joystick_0,joystick_1,joystick_2,joystick_3,joystick_4;
 	wire  [7:0] joy0_x0,joy0_y0,joy0_x1,joy0_y1,joy1_x0,joy1_y0,joy1_x1,joy1_y1;
@@ -283,7 +294,7 @@ module emu
 	wire        sd_ack;
 	wire  [7:0] sd_buff_addr;
 	wire [15:0] sd_buff_dout;
-	wire [15:0] sd_buff_din = '0;
+	wire [15:0] sd_buff_din;
 	wire        sd_buff_wr;
 	wire        img_mounted;
 	wire        img_readonly;
@@ -320,7 +331,7 @@ module emu
 		.status(status),
 		.status_in(status),
 		.status_set(0),
-		.status_menumask({1'b1,1'b1}),
+		.status_menumask(status_menumask),
 	
 		.ioctl_download(ioctl_download),
 		.ioctl_index(ioctl_index),
@@ -351,9 +362,10 @@ module emu
 	);
 	
 	wire bios_download = ioctl_download & (ioctl_index[5:2] == 4'b0000 && ioctl_index[1:0] != 2'h3);
-//	wire cart_download = ioctl_download & (ioctl_index[5:2] == 4'b0000 && ioctl_index[1:0] == 2'h3);
+	wire kanji_download = ioctl_download & (ioctl_index[5:2] == 4'b0000 && ioctl_index[1:0] == 2'h3);
 	wire cdd_data_download = ioctl_download & (ioctl_index[5:2] == 4'b0010);
 	wire cdd_info_download = ioctl_download & (ioctl_index[5:2] == 4'b0011);
+	wire save_download = ioctl_download & (ioctl_index[5:2] == 4'b0001);
 	
 	reg osd_btn = 0;
 //	always @(posedge clk_sys) begin
@@ -379,6 +391,7 @@ module emu
 	wire mem_rst = RESET | status[0] | buttons[1];
 	
 	wire [15:0] joy0_data = {1'b1, 2'b00, joystick_0[2], joystick_0[3], joystick_0[0], joystick_0[1], joystick_0[4], joystick_0[5], joystick_0[6], joystick_0[7], joystick_0[8], joystick_0[9], joystick_0[10], 2'b00};
+	wire [15:0] joy1_data = {1'b1, 2'b00, joystick_1[2], joystick_1[3], joystick_1[0], joystick_1[1], joystick_1[4], joystick_1[5], joystick_1[6], joystick_1[7], joystick_1[8], joystick_1[9], joystick_1[10], 2'b00};
 	
 
 `ifdef DEBUG
@@ -405,14 +418,36 @@ module emu
 	//Of these, 0x5C000 bytes start at BRAM_OFFS*0x10000, while the remaining 0x4000 bytes always start at offset 0xFC000 (VDL). 
 	reg  [ 3: 0] BRAM_OFFS;
 	always @(posedge clk_sys) begin
-		case (status[10:8])
-			3'h0: BRAM_OFFS <= 4'h0;
-			3'h1: BRAM_OFFS <= 4'h4;
-			3'h2: BRAM_OFFS <= 4'h6;
-			3'h3: BRAM_OFFS <= 4'h8;
-			3'h4: BRAM_OFFS <= 4'hA;
-		endcase
+		reg [31: 0] id;
+	
+		if (cdd_info_download && ioctl_wr) begin
+			if (ioctl_addr == 25'h458) begin
+				id[31:16] <= {ioctl_data[7:0],ioctl_data[15:8]};
+			end 
+			else if (ioctl_addr == 25'h45A) begin
+				id[15:0] <= {ioctl_data[7:0],ioctl_data[15:8]};
+			end 
+			else if (ioctl_addr == 25'h480) begin
+				BRAM_OFFS <= 4'h0;
+				if (id == 32'h274E924C) BRAM_OFFS <= 4'h4;//Alone in the Dark (US)
+				if (id == 32'h0340842C) BRAM_OFFS <= 4'hA;//Cannon Fodder (US)
+				if (id == 32'h2D731C98) BRAM_OFFS <= 4'hA;//FIFA International Soccer (US, Korea)
+				if (id == 32'h2584F855) BRAM_OFFS <= 4'h8;//Psychic Detective (US) (Disc 1)
+				if (id == 32'h031BED09) BRAM_OFFS <= 4'h6;//Quarantine (US)
+				if (id == 32'h06DE0DC2) BRAM_OFFS <= 4'hA;//Road & Track Presents - The Need for Speed (US, EU)
+				if (id == 32'h2D95DCB6) BRAM_OFFS <= 4'h6;//Seal of the Pharaoh (US)
+			end
+		end
 	end
+//	always @(posedge clk_sys) begin
+//		case (status[10:8])
+//			3'h0: BRAM_OFFS <= 4'h0;
+//			3'h1: BRAM_OFFS <= 4'h4;
+//			3'h2: BRAM_OFFS <= 4'h6;
+//			3'h3: BRAM_OFFS <= 4'h8;
+//			3'h4: BRAM_OFFS <= 4'hA;
+//		endcase
+//	end
 	
 	wire [23: 2] LA;
 	wire         LRAS0_N;
@@ -450,6 +485,8 @@ module emu
 	wire         SRAMW_N;
 	wire         SRAMR_N;
 	
+	wire         ROM_SEL;
+	
 	wire [ 7: 0] CDDI;
 	wire [ 7: 0] CDDO;
 	wire         CDEN_N;
@@ -484,11 +521,21 @@ module emu
 	wire SYS_CE_R = CE_R;
 	wire SYS_CE_F = CE_F;
 	
-	reg POWER_ON;
-	always @(posedge clk_sys) begin
-		if (reset) POWER_ON <= 1;
-		else if (CE_R) POWER_ON <= 0;
-	end
+	wire VCE_2X;	//Video clock
+	CEGen VCE_CEGen
+	(
+		.CLK(clk_sys),
+		.RST_N(1),
+		.IN_CLK(in_clk),
+		.OUT_CLK(24545400*2),
+		.CE(VCE_2X)
+	);
+	
+	bit VCLK_DIV;
+	always @(posedge clk_sys) 
+		if (VCE_2X) VCLK_DIV <= ~VCLK_DIV;
+	wire VCE_R =  VCLK_DIV & VCE_2X;
+	wire VCE_F = ~VCLK_DIV & VCE_2X;
 	
 	wire ACLK_CE;	//Audio clock
 	CEGen AUD_CEGen
@@ -499,6 +546,12 @@ module emu
 		.OUT_CLK(16934400),
 		.CE(ACLK_CE)
 	);
+	
+	reg POWER_ON;
+	always @(posedge clk_sys) begin
+		if (reset) POWER_ON <= 1;
+		else if (CE_R) POWER_ON <= 0;
+	end
 	
 	P3DO p3do
 	(
@@ -548,6 +601,8 @@ module emu
 		.SRAMW_N(SRAMW_N),
 		.SRAMR_N(SRAMR_N),
 		
+		.ROM_SEL(ROM_SEL),
+		
 		.CDDI(CDDI),
 		.CDDO(CDDO),
 		.CDEN_N(CDEN_N),
@@ -561,8 +616,8 @@ module emu
 		
 		.S(VRAM_SQ),
 		
-		.VCE_R(CE_R),
-		.VCE_F(CE_F),
+		.VCE_R(VCE_R),
+		.VCE_F(VCE_F),
 		.AD({R,G,B}),
 		.HS_N(HS_N),
 		.VS_N(VS_N),
@@ -604,11 +659,17 @@ module emu
 		.CDD_DTEN(cdd_data_download),
 		.CDD_DIEN(cdd_info_download),
 	
-		.DISCIN(status[15]),
+		.DISCIN(1'b1/*status[15]*/),
 		.EXT_BUS(EXT_BUS)
 	);
 	
-	HPS2PAD pad0
+	wire [ 2: 0] pad1_sel = status[34:32];
+	wire [ 2: 0] pad2_sel = status[37:35];
+	
+	wire [31: 0] PAD12_DATA = {pad1_sel == 3'd0 ? joy0_data : 16'hFFFF,
+	                           pad2_sel == 3'd0 ? joy1_data : 16'hFFFF};
+	
+	HPS2PAD pad
 	(
 		.RST_N(~reset),
 		.CLK(clk_sys),
@@ -622,8 +683,9 @@ module emu
 		.EXPBDIN(1'b1),
 		.EXPBDOUT(),
 	
-		.JOY(joy0_data)
+		.PAD_DATA(PAD12_DATA)
 	);
+	
 	
 	wire [15:0] sdr1_dout;
 	sdram sdram1
@@ -779,10 +841,10 @@ module emu
 		.rst(mem_rst),
 	
 		//
-		.io_addr(bios_download ? {8'b00000001,ioctl_addr[19:2]} : {8'b00000001,PA[19:2]}),
-		.io_din (bios_download ? {2{ioctl_data[7:0],ioctl_data[15:8]}} : RAM_DO),
-		.io_we  (bios_download ? {~ioctl_addr[1],~ioctl_addr[1],ioctl_addr[1],ioctl_addr[1]}&{4{ioctl_wr}} : 4'b0000),
-		.io_rd  (bios_download ? 1'b0 : ~ROMCS_N&MCLK_CE),
+		.io_addr(bios_download || kanji_download ? {7'b0000001,kanji_download,ioctl_addr[19:2]} : {7'b0000001,ROM_SEL,PA[19:2]}),
+		.io_din (bios_download || kanji_download ? {2{ioctl_data[7:0],ioctl_data[15:8]}} : RAM_DO),
+		.io_we  (bios_download || kanji_download ? {~ioctl_addr[1],~ioctl_addr[1],ioctl_addr[1],ioctl_addr[1]}&{4{ioctl_wr}} : 4'b0000),
+		.io_rd  (bios_download || kanji_download ? 1'b0 : ~ROMCS_N&MCLK_CE),
 		.io_dout(ddr_io_do),
 		.io_busy(ddr_io_busy),
 		
@@ -837,7 +899,7 @@ module emu
 	end
 	
 	wire  [7:0] NVRAM_Q;
-	dpram #(15)	nvram
+	dpram_dif #(15,8,14,16)	nvram
 	(
 		.clock(clk_sys),
 		.address_a(PA[16:2]),
@@ -845,9 +907,75 @@ module emu
 		.wren_a(~SRAMW_N),
 		.q_a(NVRAM_Q),
 
-		.address_b('0),
-		.wren_b(0)
+		.address_b({sd_lba[5:0],sd_buff_addr}),
+		.data_b(sd_buff_dout),
+		.wren_b(sd_buff_wr & sd_ack),
+		.q_b(sd_buff_din)
 	);
+	
+	/////////////////////////  STATE SAVE/LOAD  /////////////////////////////
+
+	wire bk_save_write = ~SRAMW_N;
+	reg bk_pending;
+
+	always @(posedge clk_sys) begin
+		if (bk_ena && !OSD_STATUS && bk_save_write)
+			bk_pending <= 1'b1;
+		else if (bk_state || !bk_ena)
+			bk_pending <= 1'b0;
+	end
+
+	reg bk_ena = 0;
+	reg old_downloading = 0;
+	always @(posedge clk_sys) begin
+		old_downloading <= save_download;
+		if(~old_downloading & save_download) bk_ena <= 0;
+
+		//Save file always mounted in the end of downloading state.
+		if(save_download && img_mounted && !img_readonly) bk_ena <= 1;
+	end
+
+	wire bk_load    = status[12];
+	wire bk_save    = status[13] | (bk_pending & OSD_STATUS & status[14]);
+	reg  bk_loading = 0;
+	reg  bk_state   = 0;
+	always @(posedge clk_sys) begin
+		reg old_load = 0, old_save = 0, old_ack;
+
+		old_load <= bk_load & bk_ena;
+		old_save <= bk_save & bk_ena;
+		old_ack  <= sd_ack;
+
+		if(sd_ack && !old_ack) {sd_rd, sd_wr} <= 0;
+
+		if(!bk_state) begin
+			if((bk_load && !old_load) | (bk_save && !old_save)) begin
+				bk_state <= 1;
+				bk_loading <= bk_load;
+				sd_lba <= 0;
+				sd_rd <=  bk_load;
+				sd_wr <= ~bk_load;
+			end
+			if(old_downloading && !bios_download && !kanji_download && bk_ena) begin
+				bk_state <= 1;
+				bk_loading <= 1;
+				sd_lba <= 0;
+				sd_rd <= 1;
+				sd_wr <= 0;
+			end
+		end else begin
+			if (old_ack && !sd_ack) begin
+				if (sd_lba == 32'h3F) begin
+					bk_loading <= 0;
+					bk_state <= 0;
+				end else begin
+					sd_lba <= sd_lba + 1'd1;
+					sd_rd  <=  bk_loading;
+					sd_wr  <= ~bk_loading;
+				end
+			end
+		end
+	end
 	
 
 	////////////////////////////////////////////////////////////////
@@ -878,7 +1006,7 @@ module emu
 	assign CLK_VIDEO = clk_sys;
 	assign VGA_SL = {~INTERLACE,~INTERLACE} & sl[1:0];
 	
-	video_mixer #(.LINE_LENGTH(320+8), .HALF_DEPTH(0), .GAMMA(1)) video_mixer
+	video_mixer #(.LINE_LENGTH(640+8), .HALF_DEPTH(0), .GAMMA(1)) video_mixer
 	(
 		.*,
 	
@@ -952,6 +1080,8 @@ module emu
 				'h03D: begin DBG_EXT[6] <= 1; end 	// 7
 				'h03E: begin DBG_EXT[7] <= 1; end 	// 8
 `endif
+				'h07B: begin DBG_EXT[6] <= 1; end 	// Num-
+				'h079: begin DBG_EXT[7] <= 1; end 	// Num+
 				default:;
 			endcase
 		end
