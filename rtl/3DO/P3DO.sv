@@ -55,6 +55,8 @@ module P3DO
 	output             SRAMW_N,
 	output             SRAMR_N,
 	
+	output             ROM_SEL,
+	
 	input      [ 7: 0] CDDI,
 	output reg [ 7: 0] CDDO,
 	output reg         CDEN_N,
@@ -136,6 +138,9 @@ module P3DO
 	bit          EINT_N;
 	bit  [ 3: 0] CLIO_ADBIO_O;
 	bit  [15: 0] CLIO_AUDIOL,CLIO_AUDIOR;
+	
+	bit          HSYNC_N;
+	bit          VSYNC_N;
 	
 	ARM6_CORE cpu
 	(
@@ -222,6 +227,7 @@ module P3DO
 		.DI(MADAM_DI),
 		.DO(MADAM_DO),
 		
+		.CPU_DI(CPU_DO),
 		.nRW(CPU_nRW),
 		.nWB(CPU_nWB),
 		.nMREQ(CPU_nMREQ),
@@ -323,6 +329,8 @@ module P3DO
 		.MCLK_PH1(MCLK_PH1),
 		.MCLK_PH2(MCLK_PH2),
 		.A(CPU_A[15:2]),
+		.CPU_DI(CPU_DO),
+		
 		.DI(CLIO_DI),
 		.DO(CLIO_DO),
 		.CLC(CLC),
@@ -348,8 +356,8 @@ module P3DO
 		
 		.VCE_R(VCE_R),
 		.VCE_F(VCE_F),
-		.HS_N(HS_N),
-		.VS_N(VS_N),
+		.HSYNC_N(HSYNC_N),
+		.VSYNC_N(VSYNC_N),
 		
 		.S(S),
 		.LPSC_N(LPSC_N),
@@ -369,6 +377,8 @@ module P3DO
 	wire         MUTE = 0;//CLIO_ADBIO_O[1];
 	assign AUDIOL = CLIO_AUDIOL & {16{~MUTE}};
 	assign AUDIOR = CLIO_AUDIOR & {16{~MUTE}};
+	
+	assign ROM_SEL = CLIO_ADBIO_O[2];
 	
 	OSA osa
 	(
@@ -410,12 +420,16 @@ module P3DO
 		.VCE_R(VCE_R),
 		.VCE_F(VCE_F),
 		
+		.HSYNC_N(HSYNC_N),
+		.VSYNC_N(VSYNC_N),
+		
 		.HS_N(HS_N),
 		.VS_N(VS_N),
 		.HBLK_N(HBLK_N),
 		.VBLK_N(VBLK_N),
 		.DCLK(DCLK),
 		
+		.DBG_EXT(DBG_EXT),
 		.DBG_BORD_DIS(SCRN_EN[2])
 	);
 
