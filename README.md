@@ -20,3 +20,6 @@ Known issues:
 Some games have popping and noise.
 
 The Japanese game library has not been fully tested.
+
+## Kanji ROM
+Rename the kanji.bin file to kanji.rom and place it in the game folder or parent folder.
