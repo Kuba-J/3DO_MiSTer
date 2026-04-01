@@ -29,8 +29,7 @@ module MADAM_SPORT
 	output reg         VIDMID_CURR,
 	input              VIDOUT_ACK,
 	
-	input              VCE_R,
-	input              VCE_F,
+	input              VCE,
 	input              PCSC,
 	output             LSC,
 	output             RSC
@@ -62,7 +61,7 @@ module MADAM_SPORT
 			CLUT_DMACTL_UPDATED <= 0;
 		end
 		else if (EN) begin
-			if (VCE_R) begin
+			if (VCE) begin
 				CLUT_DMACTL_UPDATED <= 0;
 			end
 			
@@ -87,7 +86,7 @@ module MADAM_SPORT
 			{VZ,VN,FN,FC,VR,VD,VL} <= '0;
 			PCSC_OLD <= '0;
 		end
-		else if (EN && VCE_R) begin
+		else if (EN && VCE) begin
 			PCSC_OLD <= {PCSC_OLD[2:0],PCSC};
 			
 			HCOUNT <= HCOUNT + 11'd1;
@@ -129,7 +128,7 @@ module MADAM_SPORT
 			// synopsys translate_on
 		end
 		else begin
-			if (EN && VCE_R) begin
+			if (EN && VCE) begin
 				if (HCOUNT == 11'd7) begin
 					if (VZ) begin
 						ALLOW <= 0;
@@ -196,7 +195,7 @@ module MADAM_SPORT
 				end
 			end
 			
-			if (EN && VCE_R) begin
+			if (EN && VCE) begin
 				if (PEND && HCOUNT >= 11'd1340 - 1) begin
 					CNT <= '0;
 					PEND <= 0;
@@ -225,7 +224,7 @@ module MADAM_SPORT
 			VIDEO_TRANS_EXEC <= 0;
 			VIDEO_CNT <= '0;
 		end else begin
-			if (EN && VCE_R) begin
+			if (EN && VCE) begin
 				if (HCOUNT == 11'd1490 - 1 && ENVIDDMA && VSCTXEN) begin
 					PEND <= 1;
 					VIDEO_TRANS_PEND <= 1;
@@ -294,8 +293,8 @@ module MADAM_SPORT
 		end
 	end
 	
-	assign LSC = ((CLUT_TRANS_EXEC | (VIDEO_TRANS_EXEC & (VIDEO_CNT[0] ^  VIDOUT_PFL) & HCOUNT[0])) & VCE_R);
-	assign RSC = ((CLUT_TRANS_EXEC | (VIDEO_TRANS_EXEC & (VIDEO_CNT[0] ^ ~VIDOUT_PFL) & HCOUNT[0])) & VCE_R);
+	assign LSC = ((CLUT_TRANS_EXEC | (VIDEO_TRANS_EXEC & (VIDEO_CNT[0] ^  VIDOUT_PFL) & HCOUNT[0])) & VCE);
+	assign RSC = ((CLUT_TRANS_EXEC | (VIDEO_TRANS_EXEC & (VIDEO_CNT[0] ^ ~VIDOUT_PFL) & HCOUNT[0])) & VCE);
 	
 	always_comb begin
 		AG_CTL = '0;

@@ -63,7 +63,6 @@ module MADAM_SE
 	output reg [31: 0] DBG_SCOB_PPMPC,
 	output reg [31: 0] DBG_SCOB_PRE0,
 	output reg [31: 0] DBG_SCOB_PRE1,
-	output MunkeeCtrl_t DBG_MUNKEE_A_CTL,DBG_MUNKEE_B_CTL,
 	output reg [ 9: 0] DBG_WAIT_CNT,
 	output reg [11: 0] DBG_ROW_WAIT_CNT,DBG_ROW_B_WAIT_CNT,
 	output reg [ 7: 0] DBG_ROWFULL_WAIT_CNT,
@@ -1032,7 +1031,7 @@ module MADAM_SE
 			casex ({SCOB_PRE0.LINEAR,SCOB_PRE0.BPP})
 				4'b1101: {B15,R,G,B} = {1'b0,{PIN_A[7:5],PIN_A[7:6]&{2{SCOB_PRE0.REP8}}},{PIN_A[4:2],PIN_A[4:3]&{2{SCOB_PRE0.REP8}}},{PIN_A[1:0],PIN_A[1:0]&{2{SCOB_PRE0.REP8}},PIN_A[1]&SCOB_PRE0.REP8}};
 				4'b111x: {B15,R,G,B} = {PIN_A[15],PIN_A[14:10],PIN_A[9:5],PIN_A[4:0]};
-				default: {B15,R,G,B} = {PIP_DOUT[15],PIP_DOUT[14:10],PIP_DOUT[14:10],PIP_DOUT[ 9: 5],PIP_DOUT[ 4: 0]};
+				default: {B15,R,G,B} = {PIP_DOUT[15],PIP_DOUT[14:10],PIP_DOUT[ 9: 5],PIP_DOUT[ 4: 0]};
 			endcase
 			T = (~|{R,G,B} & ~SCOB_FLAG.BGND) | TRANSPARENT;
 			casex ({SCOB_PRE0.LINEAR,SCOB_PRE0.BPP})

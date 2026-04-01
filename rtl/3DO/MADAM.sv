@@ -26,8 +26,7 @@ module MADAM
 	output             MCLK_PH2,
 	output             PH1,
 	
-	input              VCE_R,
-	input              VCE_F,
+	input              VCE,
 	output reg         LPSC_N,
 	output reg         RPSC_N,
 	
@@ -543,8 +542,7 @@ module MADAM
 		.V_CNT(V_CNT),
 		.FORCE_CLUT(),
 		
-		.VCE_R(VCE_R),
-		.VCE_F(VCE_F),
+		.VCE(VCE),
 		.DMAREQ(DMAREQ),
 		.DMACH(DMACH),
 		.CCODE(CLC),
@@ -718,8 +716,7 @@ module MADAM
 		.VIDMID_CURR(VIDMID_CURR),
 		.VIDOUT_ACK(VIDOUT_ACK),
 		
-		.VCE_R(VCE_R),
-		.VCE_F(VCE_F),
+		.VCE(VCE),
 		.PCSC(PCSC),
 		.LSC(SPORT_LSC),
 		.RSC(SPORT_RSC)
@@ -743,8 +740,7 @@ module MADAM
 		
 		.PLAYXEN(MCTL[15]),
 		
-		.VCE_R(VCE_R),
-		.VCE_F(VCE_F),
+		.VCE(VCE),
 		.H_CNT(H_CNT),
 		.V_CNT(V_CNT),
 		
@@ -781,7 +777,7 @@ module MADAM
 	);
 	
 	always @(posedge CLK) begin
-//		if (VCE_R) begin
+//		if (VCE) begin
 			LSC <= SPORT_LSC;
 			RSC <= SPORT_RSC;
 //		end

@@ -18,8 +18,7 @@ module MADAM_PLAYER
 	
 	input              PLAYXEN,
 	
-	input              VCE_R,
-	input              VCE_F,
+	input              VCE,
 	input      [10: 0] H_CNT,
 	input      [ 9: 0] V_CNT,
 	
@@ -63,7 +62,7 @@ module MADAM_PLAYER
 			PEND <= 0;
 			// synopsys translate_on
 		end else begin
-			if (EN && VCE_R) begin
+			if (EN && VCE) begin
 				DBG_WAIT_CNT <= DBG_WAIT_CNT + 1'd1;
 				
 				if (V_CNT <= 10'd7) begin

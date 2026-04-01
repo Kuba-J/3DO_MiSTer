@@ -33,8 +33,7 @@ module MADAM_EXTPIF
 	output     [ 9: 0] V_CNT,
 	output             FORCE_CLUT,
 	
-	input              VCE_R,
-	input              VCE_F,
+	input              VCE,
 	input              DMAREQ,
 	input      [ 4: 0] DMACH,//
 	output reg [ 2: 0] CCODE,
@@ -293,7 +292,7 @@ module MADAM_EXTPIF
 			{VZ,VN,FN,FC,VR,VD,VL} <= '0;
 			PCSC_OLD <= '0;
 		end
-		else if (EN && VCE_R) begin
+		else if (EN && VCE) begin
 			PCSC_OLD <= {PCSC_OLD[2:0],PCSC};
 			
 			HCOUNT <= HCOUNT + 11'd1;
