@@ -49,7 +49,6 @@ module MADAM_PLAYER
 	always @(posedge CLK or negedge RST_N) begin
 		bit          ENABLE;
 		bit          START_PEND,END_PEND,SHIFT_PEND;
-		bit          DMA_REG_OVF_FF;
 		
 		if (!RST_N) begin
 			PBCLK <= 0;
@@ -121,8 +120,7 @@ module MADAM_PLAYER
 				end
 			
 				INT <= 0;
-				DMA_REG_OVF_FF <= DMA_REG_OVF;
-				if (DATA_WR && DMA_REG_OVF_FF) begin
+				if (DATA_WR && DMA_REG_OVF) begin
 					INT <= 1;
 					END_PEND <= 1;
 				end
@@ -158,10 +156,17 @@ module MADAM_PLAYER
 		AG_CTL = '0;
 		
 		case (BUS_STATE)
-			PLAY_INIT0: begin
+			PLAY_PREINIT1: begin
 				AG_CTL.DMA_GROUP_ADDR = 7'h5C;
 				AG_CTL.DMA_GROUP_ADDR_SEL = 1;
 				AG_CTL.DMA_GROUP_HOLD = 1;
+				AG_CTL.DMA_REG_READ_SEL = 1;
+				AG_CTL.DMA_REG_READ_CTL = 2'h2;
+				AG_CTL.DMA_ADDR_SEL = 1;
+				AG_CTL.DMA_ADDER_CTL = 4'b0000;
+			end
+			
+			PLAY_INIT0: begin
 				AG_CTL.DMA_REG_READ_SEL = 1;
 				AG_CTL.DMA_REG_READ_CTL = 2'h2;
 				AG_CTL.DMA_ADDR_SEL = 1;
@@ -193,10 +198,17 @@ module MADAM_PLAYER
 				AG_CTL.DMA_ADDER_CTL = 4'b0001;
 			end
 			
-			PLAY_INIT2: begin
+			PLAY_PREINIT3: begin
 				AG_CTL.DMA_GROUP_ADDR = 7'h5C;
 				AG_CTL.DMA_GROUP_ADDR_SEL = 1;
 				AG_CTL.DMA_GROUP_HOLD = 1;
+				AG_CTL.DMA_REG_READ_SEL = 1;
+				AG_CTL.DMA_REG_READ_CTL = 2'h0;
+				AG_CTL.DMA_ADDR_SEL = 1;
+				AG_CTL.DMA_ADDER_CTL = 4'b0000;
+			end
+			
+			PLAY_INIT2: begin
 				AG_CTL.DMA_REG_READ_SEL = 1;
 				AG_CTL.DMA_REG_READ_CTL = 2'h0;
 				AG_CTL.DMA_ADDR_SEL = 1;

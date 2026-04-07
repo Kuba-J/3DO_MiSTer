@@ -15,6 +15,7 @@ module MADAM_AG
 	//CPU
 	input      [23: 2] CPU_ADDR,
 	input              CPU_ACCESS,
+	input              CPU_START,
 	input              CPU_DRAM0_SEL,
 	input              CPU_DRAM1_SEL,
 	input              CPU_VRAM_SEL,
@@ -53,7 +54,7 @@ module MADAM_AG
 	input BusState_t   BUS_STATE,
 	input AddrGenCtl_t DMA_CTL,
 	output reg         PBI,
-	output             REG_OVF,
+	output reg         REG_OVF,
 	output reg         REG_ZERO,
 	
 	//SYSRAM
@@ -76,16 +77,14 @@ module MADAM_AG
 	output             ROE_N,
 	output             RDSF,
 	input              RQSF,
-	output     [ 3: 0] RCODE
+	output     [ 3: 0] RCODE,
 
-`ifdef DEBUG
-	                   ,
 	output reg [23: 0] DBG_REG100,DBG_REG104,DBG_REG110,DBG_REG114,
 	output reg [23: 0] DBG_REG120,DBG_REG124,DBG_REG128,DBG_REG12C,
 	output reg         DBG_HOOK
-`endif
 );
 	 	
+	//
 	bit  [23: 2] ADDR_SRC_OUT;
 	bit  [23: 2] ADDR_FF_1,ADDR_FF_2;
 	bit  [23: 2] OFFS_FF;
@@ -136,7 +135,7 @@ module MADAM_AG
 	wire [ 6: 0] DMA_STACK_RADDR = {DMA_ADDR_FF_1,DMA_CTL.DMA_REG_READ_SEL ? DMA_CTL.DMA_REG_READ_CTL : DMA_ADDR_FF_0};
 	wire [ 6: 0] DMA_STACK_WADDR = DMA_CTL.DMA_REG_WRITE_SEL ? {DMA_ADDR_FF_1,DMA_ADDR_FF_0} : {DMA_ADDR_FF_1[6:3],DMA_CTL.DMA_REG_WRITE_CTL};
 	wire         DMA_STACK_WE = DMA_CTL.DMA_REG_WRITE_EN;
-
+	
 	bit  [23: 2] DMA_STACK_OUT;
 	MADAM_DMA_STACK DMA_STACK
 	(
@@ -152,7 +151,6 @@ module MADAM_AG
 		.DOUT(DMA_STACK_OUT)
 	);
 	
-`ifdef DEBUG
 	always @(posedge CLK or negedge RST_N) begin
 		if (!RST_N) begin
 			DBG_REG100 <= '0;
@@ -182,12 +180,10 @@ module MADAM_AG
 			end
 		end
 	end 
-`endif
 	
 	wire [23: 2] ADDR_SRC_TEMP = DMA_CTL.CPU_ADDR_SEL ? CPU_ADDR :
 	                             //DMA_CTL.SPR_ADDR_SEL ? SE_LEFT_ADDR[23:2] :
 								                               ADDR_FF_2;
-
 	assign ADDR_SRC_OUT = DMA_CTL.DMA_ADDR_SEL ? DMA_STACK_OUT : ADDR_SRC_TEMP;
 	
 	always @(posedge CLK or negedge RST_N) begin
@@ -226,6 +222,7 @@ module MADAM_AG
 		ADDER_OUT = ADD_A + ADD_B;
 	end
 	
+	//324
 	always @(posedge CLK or negedge RST_N) begin
 		if (!RST_N) begin
 			ADDR_FF_2 <= '0;
@@ -260,7 +257,6 @@ module MADAM_AG
 		end
 	end 
 	
-	assign REG_OVF = DMA_STACK_IN[23] & DMA_STACK_WE;
 	always @(posedge CLK or negedge RST_N) begin
 		if (!RST_N) begin
 			REG_ZERO <= 0;
@@ -268,6 +264,7 @@ module MADAM_AG
 		else if (EN && CE_R) begin
 			if (DMA_STACK_WE) begin
 				REG_ZERO <= ~|DMA_STACK_IN;
+				REG_OVF <= DMA_STACK_IN[23];
 			end
 		end
 	end 
@@ -321,6 +318,8 @@ module MADAM_AG
 				
 				default:;
 			endcase
+			
+//			if (LINE0) PFL <= 0;
 		end
 	end 
 	assign VIDOUT_PFL = PFL;
@@ -352,7 +351,11 @@ module MADAM_AG
 	
 	wire         CPU_RAM_SEL = CPU_DRAM0_SEL || CPU_DRAM1_SEL || CPU_VRAM_SEL;
 	
-	
+	wire         AG_START =  (BUS_STATE_FF == EXTP_INIT1 || BUS_STATE_FF == EXTP_INIT3 || 
+	                          BUS_STATE_FF == PLAY_INIT1 || BUS_STATE_FF == PLAY_INIT3 ||
+									  BUS_STATE_FF == SCOB_INIT1 || BUS_STATE_FF == SCOB_NEXT_REL1 || BUS_STATE_FF == SCOB_SOURCE_REL1 || BUS_STATE_FF == SCOB_PIPPTR_REL1 || 
+									  BUS_STATE_FF == SCOB_INIT3 || BUS_STATE_FF == SCOB_INIT5 || BUS_STATE_FF == SCOB_INIT7 ||
+									  BUS_STATE_FF == SPR_INIT1 || BUS_STATE_FF == SPR_INIT3);
 	wire         AG_ACCESS = (BUS_STATE_FF == EXTP_READ0 || BUS_STATE_FF == EXTP_READ1 || 
 	                          BUS_STATE_FF == EXTP_WRITE0 || BUS_STATE_FF == EXTP_WRITE1 ||
 									  BUS_STATE_FF == PLAY_READ0 || BUS_STATE_FF == PLAY_READ1 || 
@@ -407,32 +410,33 @@ module MADAM_AG
 	wire         RIGHT_TRANS = PFL ? (CURR_TRANS || CURR_SPLIT) : (PREV_TRANS || PREV_SPLIT);
 	wire         LEFT_SPLIT  = PFL ? PREV_SPLIT : CURR_SPLIT;
 	wire         RIGHT_SPLIT = PFL ? CURR_SPLIT : PREV_SPLIT;
-	wire         VRAM_RW = (BUS_STATE_FF == CLUT_CTRL0 || BUS_STATE_FF == CLUT_CTRL1 || 
+	wire         CLUT_START = (BUS_STATE_FF == CLUT_INIT1);
+	wire         CLUT_RW = (BUS_STATE_FF == CLUT_CTRL0 || BUS_STATE_FF == CLUT_CTRL1 || 
 	                        BUS_STATE_FF == CLUT_CURR0 || BUS_STATE_FF == CLUT_CURR1 || 
 									BUS_STATE_FF == CLUT_PREV0 || BUS_STATE_FF == CLUT_PREV1 ||
 									BUS_STATE_FF == CLUT_NEXT0 || BUS_STATE_FF == CLUT_NEXT1);
 	
 	assign LA       = SE_GRANT && CFB_ACCESS && SE_LEFT_WRITE ? SE_LEFT_ADDR[23:2] : SE_GRANT && CFB_ACCESS && SE_RIGHT_WRITE ? SE_RIGHT_ADDR[23:2] : CPU_GRANT && CPU_SPORT_SEL ? {4'b0000,AOUT[10:2],9'b000000000} : AOUT;
-	assign LRAS0_N  = SE_GRANT && CFB_ACCESS ? ~CFB_VRAM_SEL      : SE_GRANT || EXTP_GRANT || PLAYER_GRANT ? ~(AG_ACCESS & VRAM_SEL         ) : CPU_GRANT ? ~(CPU_ACCESS & (CPU_VRAM_SEL | CPU_SPORT_SEL)) : ~(LEFT_TRANS | VRAM_RW);
-	assign LRAS2_N  = SE_GRANT && CFB_ACCESS ? ~CFB_DRAM0_SEL     : SE_GRANT || EXTP_GRANT || PLAYER_GRANT ? ~(AG_ACCESS & DRAM0_SEL        ) : CPU_GRANT ? ~(CPU_ACCESS &  CPU_DRAM0_SEL                ) : 1'b1;
-	assign LRAS3_N  = SE_GRANT && CFB_ACCESS ? ~CFB_DRAM1_SEL     : SE_GRANT || EXTP_GRANT || PLAYER_GRANT ? ~(AG_ACCESS & DRAM1_SEL        ) : CPU_GRANT ? ~(CPU_ACCESS &  CPU_DRAM1_SEL                ) : 1'b1;
-	assign LCAS_N   = SE_GRANT && CFB_ACCESS ? ~((CFB_WE[1]&CE_R)|(CFB_OE[1]&CE_F)) : SE_GRANT || EXTP_GRANT || PLAYER_GRANT ? ~(AG_ACCESS &            PHASE2) : CPU_GRANT ? ~(CPU_ACCESS & (CPU_RAM_SEL | CPU_SPORT_SEL) & PHASE2) : ~((LEFT_TRANS | VRAM_RW) & PHASE2);
-	assign LWE_N[1] = SE_GRANT && CFB_ACCESS ? ~(CFB_WE[1]&CE_R)  : SE_GRANT || EXTP_GRANT || PLAYER_GRANT ? ~(AG_ACCESS & AG_WE[1] & PHASE2) : CPU_GRANT ? ~(CPU_ACCESS & ((CPU_RAM_SEL & CPU_WE[3] & PHASE2) | (CPU_SPORT_SEL & ~CPU_ADDR[13] & CPU_WE[3] & PHASE1))) : 1'b1;
-	assign LWE_N[0] = SE_GRANT && CFB_ACCESS ? ~(CFB_WE[1]&CE_R)  : SE_GRANT || EXTP_GRANT || PLAYER_GRANT ? ~(AG_ACCESS & AG_WE[1] & PHASE2) : CPU_GRANT ? ~(CPU_ACCESS & ((CPU_RAM_SEL & CPU_WE[2] & PHASE2) | (CPU_SPORT_SEL & ~CPU_ADDR[13] & CPU_WE[2] & PHASE1))) : 1'b1;
-	assign LOE_N    = SE_GRANT && CFB_ACCESS ? ~(CFB_OE[1]&CE_F)  : SE_GRANT || EXTP_GRANT || PLAYER_GRANT ? ~(AG_ACCESS & ~|AG_WE  & PHASE2) : CPU_GRANT ? ~(CPU_ACCESS & ((CPU_RAM_SEL & ~|CPU_WE & PHASE2) | (CPU_SPORT_SEL & ~|CPU_ADDR[14:13] & PHASE1))) : ~((LEFT_TRANS & PHASE1) | (VRAM_RW & PHASE2));
-	assign LDSF     =                                               SE_GRANT || EXTP_GRANT || PLAYER_GRANT ? 1'b0                             : CPU_GRANT ? (CPU_ACCESS & CPU_SPORT_SEL & |CPU_ADDR[14:13] /*& PHASE1*/) :  (LEFT_SPLIT & PHASE1);
-	assign LCODE    =                                               SE_GRANT || EXTP_GRANT || PLAYER_GRANT ? {3'b000,AG_ACCESS&AG_WE[1]}      : CPU_GRANT ? {3'b000,CPU_ACCESS&CPU_RAM_SEL&|CPU_WE[3:2]}     : 4'b0000;
+	assign LRAS0_N  = SE_GRANT && CFB_ACCESS ? ~CFB_VRAM_SEL      : SE_GRANT || EXTP_GRANT || PLAYER_GRANT ? ~((AG_START|AG_ACCESS) & VRAM_SEL ) : CPU_GRANT ? ~(((CPU_START|CPU_ACCESS) & CPU_VRAM_SEL ) | (CPU_ACCESS & CPU_SPORT_SEL)) : ~(LEFT_TRANS | CLUT_START | CLUT_RW);
+	assign LRAS2_N  = SE_GRANT && CFB_ACCESS ? ~CFB_DRAM0_SEL     : SE_GRANT || EXTP_GRANT || PLAYER_GRANT ? ~((AG_START|AG_ACCESS) & DRAM0_SEL) : CPU_GRANT ? ~(((CPU_START|CPU_ACCESS) & CPU_DRAM0_SEL)                               ) : 1'b1;
+	assign LRAS3_N  = SE_GRANT && CFB_ACCESS ? ~CFB_DRAM1_SEL     : SE_GRANT || EXTP_GRANT || PLAYER_GRANT ? ~((AG_START|AG_ACCESS) & DRAM1_SEL) : CPU_GRANT ? ~(((CPU_START|CPU_ACCESS) & CPU_DRAM1_SEL)                               ) : 1'b1;
+	assign LCAS_N   = SE_GRANT && CFB_ACCESS ? ~((CFB_WE[1]&CE_R)|(CFB_OE[1]&CE_F)) : SE_GRANT || EXTP_GRANT || PLAYER_GRANT ? ~(AG_ACCESS & PHASE2) : CPU_GRANT ? ~(CPU_ACCESS & (CPU_RAM_SEL | CPU_SPORT_SEL) & PHASE2) : ~((LEFT_TRANS | CLUT_RW) & PHASE2);
+	assign LWE_N[1] = SE_GRANT && CFB_ACCESS ? ~(CFB_WE[1]&CE_R)  : SE_GRANT || EXTP_GRANT || PLAYER_GRANT ? ~(AG_ACCESS & AG_WE[1] & PHASE2)    : CPU_GRANT ? ~(CPU_ACCESS & ((CPU_RAM_SEL & CPU_WE[3] & PHASE2) | (CPU_SPORT_SEL & ~CPU_ADDR[13] & CPU_WE[3] & PHASE1))) : 1'b1;
+	assign LWE_N[0] = SE_GRANT && CFB_ACCESS ? ~(CFB_WE[1]&CE_R)  : SE_GRANT || EXTP_GRANT || PLAYER_GRANT ? ~(AG_ACCESS & AG_WE[1] & PHASE2)    : CPU_GRANT ? ~(CPU_ACCESS & ((CPU_RAM_SEL & CPU_WE[2] & PHASE2) | (CPU_SPORT_SEL & ~CPU_ADDR[13] & CPU_WE[2] & PHASE1))) : 1'b1;
+	assign LOE_N    = SE_GRANT && CFB_ACCESS ? ~(CFB_OE[1]&CE_F)  : SE_GRANT || EXTP_GRANT || PLAYER_GRANT ? ~(AG_ACCESS & ~|AG_WE  & PHASE2)    : CPU_GRANT ? ~(CPU_ACCESS & ((CPU_RAM_SEL & ~|CPU_WE & PHASE2) | (CPU_SPORT_SEL & ~|CPU_ADDR[14:13] & PHASE1))) : ~((LEFT_TRANS & PHASE1) | (CLUT_RW & PHASE2));
+	assign LDSF     =                                               SE_GRANT || EXTP_GRANT || PLAYER_GRANT ? 1'b0                                      : CPU_GRANT ? (CPU_ACCESS & CPU_SPORT_SEL & |CPU_ADDR[14:13] /*& PHASE1*/) :  (LEFT_SPLIT & PHASE1);
+	assign LCODE    =                                               SE_GRANT || EXTP_GRANT || PLAYER_GRANT ? {AG_START,1'b0,PHASE2,AG_ACCESS&AG_WE[1]} : CPU_GRANT ? {CPU_START,1'b0,PHASE2,CPU_ACCESS&CPU_RAM_SEL&|CPU_WE[3:2]}     : 4'b0000;
 	
 	assign RA       = SE_GRANT && CFB_ACCESS && SE_LEFT_WRITE ? SE_LEFT_ADDR[23:2] : SE_GRANT && CFB_ACCESS && SE_RIGHT_WRITE ? SE_RIGHT_ADDR[23:2] : CPU_GRANT && CPU_SPORT_SEL ? {4'b0000,AOUT[10:2],9'b000000000} : AOUT;
-	assign RRAS0_N  = SE_GRANT && CFB_ACCESS ? ~CFB_VRAM_SEL      : SE_GRANT || EXTP_GRANT || PLAYER_GRANT ? ~(AG_ACCESS & VRAM_SEL         ) : CPU_GRANT ? ~(CPU_ACCESS & (CPU_VRAM_SEL | CPU_SPORT_SEL)) : ~(RIGHT_TRANS | VRAM_RW);
-	assign RRAS2_N  = SE_GRANT && CFB_ACCESS ? ~CFB_DRAM0_SEL     : SE_GRANT || EXTP_GRANT || PLAYER_GRANT ? ~(AG_ACCESS & DRAM0_SEL        ) : CPU_GRANT ? ~(CPU_ACCESS &  CPU_DRAM0_SEL                ) : 1'b1;
-	assign RRAS3_N  = SE_GRANT && CFB_ACCESS ? ~CFB_DRAM1_SEL     : SE_GRANT || EXTP_GRANT || PLAYER_GRANT ? ~(AG_ACCESS & DRAM1_SEL        ) : CPU_GRANT ? ~(CPU_ACCESS &  CPU_DRAM1_SEL                ) : 1'b1;
-	assign RCAS_N   = SE_GRANT && CFB_ACCESS ? ~((CFB_WE[0]&CE_R)|(CFB_OE[0]&CE_F)) : SE_GRANT || EXTP_GRANT || PLAYER_GRANT ? ~(AG_ACCESS &            PHASE2) : CPU_GRANT ? ~(CPU_ACCESS & (CPU_RAM_SEL | CPU_SPORT_SEL) & PHASE2) : ~((RIGHT_TRANS | VRAM_RW) & PHASE2);
-	assign RWE_N[1] = SE_GRANT && CFB_ACCESS ? ~(CFB_WE[0]&CE_R)  : SE_GRANT || EXTP_GRANT || PLAYER_GRANT ? ~(AG_ACCESS & AG_WE[0] & PHASE2) : CPU_GRANT ? ~(CPU_ACCESS & ((CPU_RAM_SEL & CPU_WE[1] & PHASE2) | (CPU_SPORT_SEL & ~CPU_ADDR[13] & CPU_WE[1] & PHASE1))) : 1'b1;
-	assign RWE_N[0] = SE_GRANT && CFB_ACCESS ? ~(CFB_WE[0]&CE_R)  : SE_GRANT || EXTP_GRANT || PLAYER_GRANT ? ~(AG_ACCESS & AG_WE[0] & PHASE2) : CPU_GRANT ? ~(CPU_ACCESS & ((CPU_RAM_SEL & CPU_WE[0] & PHASE2) | (CPU_SPORT_SEL & ~CPU_ADDR[13] & CPU_WE[0] & PHASE1))) : 1'b1;
-	assign ROE_N    = SE_GRANT && CFB_ACCESS ? ~(CFB_OE[0]&CE_F)  : SE_GRANT || EXTP_GRANT || PLAYER_GRANT ? ~(AG_ACCESS & ~|AG_WE  & PHASE2) : CPU_GRANT ? ~(CPU_ACCESS & ((CPU_RAM_SEL & ~|CPU_WE & PHASE2) | (CPU_SPORT_SEL & ~|CPU_ADDR[14:13] & PHASE1))) : ~((RIGHT_TRANS & PHASE1) | (VRAM_RW & PHASE2));
-	assign RDSF     =                                              SE_GRANT || EXTP_GRANT || PLAYER_GRANT ? 1'b0                             : CPU_GRANT ? (CPU_ACCESS & CPU_SPORT_SEL & |CPU_ADDR[14:13] /*& PHASE1*/) :  (RIGHT_SPLIT & PHASE1);
-	assign RCODE    =                                              SE_GRANT || EXTP_GRANT || PLAYER_GRANT ? {3'b000,AG_ACCESS&AG_WE[0]}      : CPU_GRANT ? {3'b000,CPU_ACCESS&CPU_RAM_SEL&|CPU_WE[1:0]}     : 4'b0000;
+	assign RRAS0_N  = SE_GRANT && CFB_ACCESS ? ~CFB_VRAM_SEL      : SE_GRANT || EXTP_GRANT || PLAYER_GRANT ? ~((AG_START|AG_ACCESS) & VRAM_SEL ) : CPU_GRANT ? ~(((CPU_START|CPU_ACCESS) & CPU_VRAM_SEL ) | (CPU_ACCESS & CPU_SPORT_SEL)) : ~(RIGHT_TRANS | CLUT_START | CLUT_RW);
+	assign RRAS2_N  = SE_GRANT && CFB_ACCESS ? ~CFB_DRAM0_SEL     : SE_GRANT || EXTP_GRANT || PLAYER_GRANT ? ~((AG_START|AG_ACCESS) & DRAM0_SEL) : CPU_GRANT ? ~(((CPU_START|CPU_ACCESS) & CPU_DRAM0_SEL)                               ) : 1'b1;
+	assign RRAS3_N  = SE_GRANT && CFB_ACCESS ? ~CFB_DRAM1_SEL     : SE_GRANT || EXTP_GRANT || PLAYER_GRANT ? ~((AG_START|AG_ACCESS) & DRAM1_SEL) : CPU_GRANT ? ~(((CPU_START|CPU_ACCESS) & CPU_DRAM1_SEL)                               ) : 1'b1;
+	assign RCAS_N   = SE_GRANT && CFB_ACCESS ? ~((CFB_WE[0]&CE_R)|(CFB_OE[0]&CE_F)) : SE_GRANT || EXTP_GRANT || PLAYER_GRANT ? ~(AG_ACCESS & PHASE2) : CPU_GRANT ? ~(CPU_ACCESS & (CPU_RAM_SEL | CPU_SPORT_SEL) & PHASE2) : ~((RIGHT_TRANS | CLUT_RW) & PHASE2);
+	assign RWE_N[1] = SE_GRANT && CFB_ACCESS ? ~(CFB_WE[0]&CE_R)  : SE_GRANT || EXTP_GRANT || PLAYER_GRANT ? ~(AG_ACCESS & AG_WE[0] & PHASE2)    : CPU_GRANT ? ~(CPU_ACCESS & ((CPU_RAM_SEL & CPU_WE[1] & PHASE2) | (CPU_SPORT_SEL & ~CPU_ADDR[13] & CPU_WE[1] & PHASE1))) : 1'b1;
+	assign RWE_N[0] = SE_GRANT && CFB_ACCESS ? ~(CFB_WE[0]&CE_R)  : SE_GRANT || EXTP_GRANT || PLAYER_GRANT ? ~(AG_ACCESS & AG_WE[0] & PHASE2)    : CPU_GRANT ? ~(CPU_ACCESS & ((CPU_RAM_SEL & CPU_WE[0] & PHASE2) | (CPU_SPORT_SEL & ~CPU_ADDR[13] & CPU_WE[0] & PHASE1))) : 1'b1;
+	assign ROE_N    = SE_GRANT && CFB_ACCESS ? ~(CFB_OE[0]&CE_F)  : SE_GRANT || EXTP_GRANT || PLAYER_GRANT ? ~(AG_ACCESS & ~|AG_WE  & PHASE2)    : CPU_GRANT ? ~(CPU_ACCESS & ((CPU_RAM_SEL & ~|CPU_WE & PHASE2) | (CPU_SPORT_SEL & ~|CPU_ADDR[14:13] & PHASE1))) : ~((RIGHT_TRANS & PHASE1) | (CLUT_RW & PHASE2));
+	assign RDSF     =                                               SE_GRANT || EXTP_GRANT || PLAYER_GRANT ? 1'b0                                      : CPU_GRANT ? (CPU_ACCESS & CPU_SPORT_SEL & |CPU_ADDR[14:13] /*& PHASE1*/) :  (RIGHT_SPLIT & PHASE1);
+	assign RCODE    =                                               SE_GRANT || EXTP_GRANT || PLAYER_GRANT ? {AG_START,1'b0,PHASE2,AG_ACCESS&AG_WE[0]} : CPU_GRANT ? {CPU_START,1'b0,PHASE2,CPU_ACCESS&CPU_RAM_SEL&|CPU_WE[1:0]}     : 4'b0000;
 	
 endmodule
 

@@ -27,10 +27,11 @@ module MADAM_CPUIF
 	input              GRANT,
 	output             READY,
 	output             ACCESS,
+	output             START,
 	output reg [ 3: 0] WE,
+	input              AG_PBI,
 	output AddrGenCtl_t AG_CTL,
 	
-	input              PBI,
 	input              SLOW_SEL,
 	input              CLIO_SEL,
 	input              CLIO_RDY,
@@ -55,6 +56,7 @@ module MADAM_CPUIF
 		end
 	end 
 	
+	wire        CPU_PB = AG_PBI && ~|A[31:24];
 	bit         STRETCH;
 	bit         BREAK;
 	bit         PAUSE;
@@ -76,6 +78,7 @@ module MADAM_CPUIF
 				else if (GRANT) STRETCH <= 0;
 				
 				if (!GRANT && !BREAK) BREAK <= 1;
+				else if (GRANT && CPU_PB && !(ICYCLE && SEQ) && !STRETCH && !BREAK) BREAK <= 1;
 				else if (GRANT) BREAK <= 0;
 			end
 		end
@@ -101,6 +104,7 @@ module MADAM_CPUIF
 		end
 	end 
 	assign ACCESS = ~(STRETCH | BREAK | ICYCLE);
+	assign START = (STRETCH | BREAK | (ICYCLE && SEQ)) & PHASE2;
 	
 	bit         EXEC;
 	always @(posedge CLK or negedge RST_N) begin
@@ -129,7 +133,7 @@ module MADAM_CPUIF
 
 	always_comb begin
 		AG_CTL = '0;
-		if (STRETCH || BREAK) begin
+		if (STRETCH || BREAK || ICYCLE) begin
 			AG_CTL.DMA_GROUP_ADDR_SEL = 0;
 			AG_CTL.DMA_GROUP_HOLD = 1;
 			AG_CTL.DMA_REG_READ_SEL = 0;

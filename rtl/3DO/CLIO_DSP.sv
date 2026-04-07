@@ -28,8 +28,6 @@ module CLIO_DSP
 	output             EO_WE
 );
 
-//	bit  [15: 0] NRC;
-//	bit  [ 9: 0] PC;
 	bit  [19: 0] ACC;
 	ALUStat_t    STATUS;
 	

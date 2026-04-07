@@ -113,6 +113,7 @@ module P3DO
 	
 	bit  [31: 0] MADAM_DI;
 	bit  [31: 0] MADAM_DO;
+	bit  [31: 0] MADAM_CPU_DO;
 	bit          MADAM_SYSRAM_EN;
 	bit          LPSC_N;
 	bit          RPSC_N;
@@ -123,6 +124,7 @@ module P3DO
 	bit          RESET_N;
 	bit  [31: 0] CLIO_DI;
 	bit  [31: 0] CLIO_DO;
+	bit  [31: 0] CLIO_CPU_DO;
 	bit          PCSC;
 	bit          DMAREQ;
 	bit  [ 4: 0] DMACH;
@@ -175,11 +177,11 @@ module P3DO
 		.DBE(CPU_DBE)
 	);
 	assign CPU_DI = CPU_A >= 32'h00000000 && CPU_A <= 32'h002FFFFF &&  MADAM_SYSRAM_EN ? DI :
-						 CPU_A >= 32'h00000000 && CPU_A <= 32'h002FFFFF && !MADAM_SYSRAM_EN ? MADAM_DO :
-						 CPU_A >= 32'h03000000 && CPU_A <= 32'h030FFFFF ? MADAM_DO :
-						 CPU_A >= 32'h03140000 && CPU_A <= 32'h0317FFFF ? MADAM_DO :
-						 CPU_A >= 32'h03300000 && CPU_A <= 32'h033FFFFF ? MADAM_DO :
-						 CPU_A >= 32'h03400000 && CPU_A <= 32'h034FFFFF ? CLIO_DO :
+						 CPU_A >= 32'h00000000 && CPU_A <= 32'h002FFFFF && !MADAM_SYSRAM_EN ? MADAM_CPU_DO :
+						 CPU_A >= 32'h03000000 && CPU_A <= 32'h030FFFFF ? MADAM_CPU_DO :
+						 CPU_A >= 32'h03140000 && CPU_A <= 32'h0317FFFF ? MADAM_CPU_DO :
+						 CPU_A >= 32'h03300000 && CPU_A <= 32'h033FFFFF ? MADAM_CPU_DO :
+						 CPU_A >= 32'h03400000 && CPU_A <= 32'h034FFFFF ? CLIO_CPU_DO :
 						 '0;
 	
 `ifdef DEBUG
@@ -231,6 +233,7 @@ module P3DO
 		.DO(MADAM_DO),
 		
 		.CPU_DI(CPU_DO),
+		.CPU_DO(MADAM_CPU_DO),
 		.nRW(CPU_nRW),
 		.nWB(CPU_nWB),
 		.nMREQ(CPU_nMREQ),
@@ -333,6 +336,7 @@ module P3DO
 		.MCLK_PH2(MCLK_PH2),
 		.A(CPU_A[15:2]),
 		.CPU_DI(CPU_DO),
+		.CPU_DO(CLIO_CPU_DO),
 		
 		.DI(CLIO_DI),
 		.DO(CLIO_DO),
@@ -416,7 +420,7 @@ module P3DO
 	
 	VE ve
 	(
-		.CLK(CLK),
+		.MCLK(CLK),
 		.VCLK(VCLK),
 		.RST_N(RST_N & RESET_N),
 		.EN(EN),

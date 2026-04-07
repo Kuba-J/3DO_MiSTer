@@ -27,6 +27,7 @@ module CLIO
 	input              MCLK_PH2,
 	input      [15: 2] A,
 	input      [31: 0] CPU_DI,
+	output reg [31: 0] CPU_DO,
 	
 	input      [31: 0] DI,
 	output reg [31: 0] DO,
@@ -860,6 +861,86 @@ module CLIO
 	wire         DSP_NRAM_WE = DSP_NRAM32_WE || (DSP_NRAM32_SEL && IO_ST == IO_DSP_WRITE) || (DSP_NRAM16_SEL && IO_ST == IO_DSP_WRITE);
 	wire         DSP_EIRAM_WE = DSP_EIRAM32_WE || (DSP_EIRAM32_SEL && IO_ST == IO_DSP_WRITE) || (DSP_EIRAM16_SEL && IO_ST == IO_DSP_WRITE);
 	
+	always @(posedge CLK) begin
+		if (CONTROL_SEL)
+			case ({A[5:2],2'b00})
+				6'h00: CPU_DO <= REV;
+				6'h08: CPU_DO <= {16'h0000,5'b00000,VINT0};
+				6'h0C: CPU_DO <= {16'h0000,5'b00000,VINT1};
+				6'h28: CPU_DO <= CSTAT;
+				6'h30: CPU_DO <= {16'h0000,5'b00000,HCNT};
+				6'h34: CPU_DO <= {16'h0000,4'b0000,FLD,2'b00,VCNT};
+				default: CPU_DO <= '0;
+			endcase
+		else if (INTERRUPT_SEL)
+			case ({A[7:2],2'b00})
+				8'h40,
+				8'h44: CPU_DO <= INT0_PEND;
+				8'h48,
+				8'h4C: CPU_DO <= {1'b1,INT0_EN[30:0]};
+				8'h50,
+				8'h54: CPU_DO <= INT_MODE;
+				8'h60,
+				8'h64: CPU_DO <= INT1_PEND;
+				8'h68,
+				8'h6C: CPU_DO <= INT1_EN;
+				8'h80: CPU_DO <= HDELAY;
+				8'h84: CPU_DO <= {16'h0000,12'h000,ADBIO_I};
+				default: CPU_DO <= '0;
+			endcase
+		else if (TIMER_SEL)
+			if (!A[2]) CPU_DO <= {16'h0000,TM_CNT[A[6:3]]};
+			else       CPU_DO <= {16'h0000,TM_RELOAD[A[6:3]]};
+		else if (FIFO_SEL)
+			case ({A[7:2],2'b00})
+				8'h04: CPU_DO <= DMAEN;
+				8'h08: CPU_DO <= DMAEN;
+				8'h80: CPU_DO <= {28'h0000000,EIFIFO_COUNT[ 0]};
+				8'h84: CPU_DO <= {28'h0000000,EIFIFO_COUNT[ 1]};
+				8'h88: CPU_DO <= {28'h0000000,EIFIFO_COUNT[ 2]};
+				8'h8C: CPU_DO <= {28'h0000000,EIFIFO_COUNT[ 3]};
+				8'h90: CPU_DO <= {28'h0000000,EIFIFO_COUNT[ 4]};
+				8'h94: CPU_DO <= {28'h0000000,EIFIFO_COUNT[ 5]};
+				8'h98: CPU_DO <= {28'h0000000,EIFIFO_COUNT[ 6]};
+				8'h9C: CPU_DO <= {28'h0000000,EIFIFO_COUNT[ 7]};
+				8'hA0: CPU_DO <= {28'h0000000,EIFIFO_COUNT[ 8]};
+				8'hA4: CPU_DO <= {28'h0000000,EIFIFO_COUNT[ 9]};
+				8'hA8: CPU_DO <= {28'h0000000,EIFIFO_COUNT[10]};
+				8'hAC: CPU_DO <= {28'h0000000,EIFIFO_COUNT[11]};
+				8'hB0: CPU_DO <= {28'h0000000,EIFIFO_COUNT[12]};
+//				8'hB4: CPU_DO <= {28'h0000000,EIFIFO_COUNT[ 0]};
+//				8'hB8: CPU_DO <= {28'h0000000,EIFIFO_COUNT[ 0]};
+				8'hC0: CPU_DO <= {28'h0000000,EIFIFO_COUNT[ 0]};
+				8'hC4: CPU_DO <= {28'h0000000,EIFIFO_COUNT[ 1]};
+				8'hC8: CPU_DO <= {28'h0000000,EIFIFO_COUNT[ 2]};
+				8'hCC: CPU_DO <= {28'h0000000,EIFIFO_COUNT[ 3]};
+				default: CPU_DO <= '0;
+			endcase
+		else if (XBUS_SEL)
+			CPU_DO <= XBUS_DO;
+		else if (DSP_DIRECT_SEL)
+			case ({A[7:2],2'b00})
+				8'hD0: CPU_DO <= {12'b0000_0000_0000,DSP_SEMAPHORE_STAT,DSP_SEMAPHORE};
+				8'hF0: CPU_DO <= {16'h0000,DSP_NOISE};
+				8'hF4: CPU_DO <= {16'h0000,6'b000000,DSP_PC};
+				8'hF8: CPU_DO <= {16'h0000,DSP_NRC};
+				8'hFC: CPU_DO <= {31'h00000000,DSP_GW};
+				default: CPU_DO <= '0;
+			endcase
+		else if (DSP_EORAM32_SEL)
+			CPU_DO <= {DSP_DO,DSP_DO_LATCH};
+		else if (DSP_EORAM16_SEL)
+			CPU_DO <= {16'h0000,DSP_DO};
+		else if (UNCLE_SEL)
+			case ({A[3:2],2'b00})
+//				4'h0: CPU_DO <= 32'h03000001;
+				4'h4: CPU_DO <= UNCLE_BITS;
+				default: CPU_DO <= '0;
+			endcase
+		else
+			CPU_DO <= '0;
+	end
+	
 	always_comb begin
 		if (CLC2 == 3'h2 && CLC1 == 3'h0) 
 			case (DMA_CHAN)
@@ -871,83 +952,7 @@ module CLIO
 				default: DO = '0;
 			endcase
 		else 
-			if (CONTROL_SEL)
-				case ({A[5:2],2'b00})
-					6'h00: DO = REV;
-					6'h08: DO = {16'h0000,5'b00000,VINT0};
-					6'h0C: DO = {16'h0000,5'b00000,VINT1};
-					6'h28: DO = CSTAT;
-					6'h30: DO = {16'h0000,5'b00000,HCNT};
-					6'h34: DO = {16'h0000,4'b0000,FLD,2'b00,VCNT};
-					default: DO = '0;
-				endcase
-			else if (INTERRUPT_SEL)
-				case ({A[7:2],2'b00})
-					8'h40,
-					8'h44: DO = INT0_PEND;
-					8'h48,
-					8'h4C: DO = {1'b1,INT0_EN[30:0]};
-					8'h50,
-					8'h54: DO = INT_MODE;
-					8'h60,
-					8'h64: DO = INT1_PEND;
-					8'h68,
-					8'h6C: DO = INT1_EN;
-					8'h80: DO = HDELAY;
-					8'h84: DO = {16'h0000,12'h000,ADBIO_I};
-					default: DO = '0;
-				endcase
-			else if (TIMER_SEL)
-				if (!A[2]) DO = {16'h0000,TM_CNT[A[6:3]]};
-				else       DO = {16'h0000,TM_RELOAD[A[6:3]]};
-			else if (FIFO_SEL)
-				case ({A[7:2],2'b00})
-					8'h04: DO = DMAEN;
-					8'h08: DO = DMAEN;
-					8'h80: DO = {28'h0000000,EIFIFO_COUNT[ 0]};
-					8'h84: DO = {28'h0000000,EIFIFO_COUNT[ 1]};
-					8'h88: DO = {28'h0000000,EIFIFO_COUNT[ 2]};
-					8'h8C: DO = {28'h0000000,EIFIFO_COUNT[ 3]};
-					8'h90: DO = {28'h0000000,EIFIFO_COUNT[ 4]};
-					8'h94: DO = {28'h0000000,EIFIFO_COUNT[ 5]};
-					8'h98: DO = {28'h0000000,EIFIFO_COUNT[ 6]};
-					8'h9C: DO = {28'h0000000,EIFIFO_COUNT[ 7]};
-					8'hA0: DO = {28'h0000000,EIFIFO_COUNT[ 8]};
-					8'hA4: DO = {28'h0000000,EIFIFO_COUNT[ 9]};
-					8'hA8: DO = {28'h0000000,EIFIFO_COUNT[10]};
-					8'hAC: DO = {28'h0000000,EIFIFO_COUNT[11]};
-					8'hB0: DO = {28'h0000000,EIFIFO_COUNT[12]};
-//					8'hB4: DO = {28'h0000000,EIFIFO_COUNT[ 0]};
-//					8'hB8: DO = {28'h0000000,EIFIFO_COUNT[ 0]};
-					8'hC0: DO = {28'h0000000,EIFIFO_COUNT[ 0]};
-					8'hC4: DO = {28'h0000000,EIFIFO_COUNT[ 1]};
-					8'hC8: DO = {28'h0000000,EIFIFO_COUNT[ 2]};
-					8'hCC: DO = {28'h0000000,EIFIFO_COUNT[ 3]};
-					default: DO = '0;
-				endcase
-			else if (XBUS_SEL)
-				DO = XBUS_DO;
-			else if (DSP_DIRECT_SEL)
-				case ({A[7:2],2'b00})
-					8'hD0: DO = {12'b0000_0000_0000,DSP_SEMAPHORE_STAT,DSP_SEMAPHORE};
-					8'hF0: DO = {16'h0000,DSP_NOISE};
-					8'hF4: DO = {16'h0000,6'b000000,DSP_PC};
-					8'hF8: DO = {16'h0000,DSP_NRC};
-					8'hFC: DO = {31'h00000000,DSP_GW};
-					default: DO = '0;
-				endcase
-			else if (DSP_EORAM32_SEL)
-				DO = {DSP_DO,DSP_DO_LATCH};
-			else if (DSP_EORAM16_SEL)
-				DO = {16'h0000,DSP_DO};
-			else if (UNCLE_SEL)
-				case ({A[3:2],2'b00})
-	//				4'h0: DO = 32'h03000001;
-					4'h4: DO = UNCLE_BITS;
-					default: DO = '0;
-				endcase
-			else
-				DO = '0;
+			DO = '0;
 	end
 	assign CREADY_N = ~IO_READY;
 	
@@ -1356,7 +1361,7 @@ module CLIO
 					
 `ifdef DEBUG
 					TEMP = $signed(DSP_EO_DATA) >= $signed(AUDIO[0]) ? $signed(DSP_EO_DATA) - $signed(AUDIO[0]) : $signed(AUDIO[0]) - $signed(DSP_EO_DATA);
-					if (!DSP_EO_ADDR[0]) DBG_HOOK <= (TEMP >= 16'd1024);
+					if (!DSP_EO_ADDR[0]) DBG_HOOK <= (TEMP >= 16'h4000);
 `endif
 				end
 				AUDWS <= 0;

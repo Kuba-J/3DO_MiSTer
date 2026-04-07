@@ -14,6 +14,7 @@ module MADAM
 	output     [31: 0] DO,
 	
 	input      [31: 0] CPU_DI,
+	output     [31: 0] CPU_DO,
 	input              nRW,
 	input              nWB,
 	input              nMREQ,
@@ -107,13 +108,16 @@ module MADAM
 	bit          MATH_RES_DONE;
 	bit          MATH_BANK,MATH_WORK_BANK;
 	
+	bit          PHASE1,PHASE2;
 	BusState_t   BUS_STATE;
+	bit          BUS_PB;
 	AddrGenCtl_t DMA_CTL;
 	
 	//CPU
 	bit          CPU_GRANT;
 	bit          CPU_READY;
 	bit          CPU_ACCESS;
+	bit          CPU_START;
 	bit  [ 3: 0] CPU_WE;
 	AddrGenCtl_t CPU_AG_CTL;
 	
@@ -192,18 +196,6 @@ module MADAM
 		MATH_MUL_WAIT
 	} MathState_t;
 	MathState_t MATH_ST;
-	
-	bit  PHASE1,PHASE2;
-	always @(posedge CLK or negedge RST_N) begin
-		if (!RST_N) begin
-			PHASE1 <= 0;
-			PHASE2 <= 0;
-		end
-		else if (EN && CE_R) begin
-			PHASE1 <= ~PHASE1;
-			PHASE2 <= PHASE1;
-		end
-	end 
 	
 	wire CPU_REG_SEL = (A[31:16] == 16'h0330 && CPU_GRANT);
 	wire REG_CTRL_SEL = CPU_REG_SEL && A[15:0] >= 16'h0000 && A[15:0] <= 16'h00FF;
@@ -381,33 +373,33 @@ module MADAM
 	MADAM_MATH_VECTOR MATH_OUT1 (.CLK(CLK), .WA(MATH_OUT_WA), .DIN(MATH_OUT_DIN), .WE(MATH_OUT_WE &  MATH_WORK_BANK & CE_R), .RA(MATH_OUT1_RA), .DOUT(MATH_OUT1_DO));
 	
 	bit  [31: 0] REG_DO;
-	always_comb begin
+	always @(posedge CLK) begin
 		if (REG_CTRL_SEL) 
 			case ({A[7:2],2'b00})
-				8'h00: REG_DO = REV;
-				8'h04: REG_DO = MSYS;
-				8'h08: REG_DO = MCTL;
-				8'h28: REG_DO = {24'h000000,SE_STAT,4'h0};
-				default: REG_DO = '0;
+				8'h00: REG_DO <= REV;
+				8'h04: REG_DO <= MSYS;
+				8'h08: REG_DO <= MCTL;
+				8'h28: REG_DO <= {24'h000000,SE_STAT,4'h0};
+				default: REG_DO <= '0;
 			endcase
 		else if (REG_DMA_SEL)
-			REG_DO = AG_MDTO;
+			REG_DO <= AG_MDTO;
 		else if (REG_MATRIX_SEL)
-			     if (                   A[7:0] <= 8'h3F) REG_DO = MATRIX_DO;
-			else if (A[7:0] >= 8'h40 && A[7:0] <= 8'h4F) REG_DO = !MATH_BANK ? VECTOR0_DO : VECTOR1_DO;
-			else if (A[7:0] >= 8'h50 && A[7:0] <= 8'h5F) REG_DO = VECTOR1_DO;
-			else if (A[7:0] >= 8'h60 && A[7:0] <= 8'h6F) REG_DO = !MATH_BANK ? MATH_OUT0_DO : MATH_OUT1_DO;
-			else                                         REG_DO = '0;
+			     if (                   A[7:0] <= 8'h3F) REG_DO <= MATRIX_DO;
+			else if (A[7:0] >= 8'h40 && A[7:0] <= 8'h4F) REG_DO <= !MATH_BANK ? VECTOR0_DO : VECTOR1_DO;
+			else if (A[7:0] >= 8'h50 && A[7:0] <= 8'h5F) REG_DO <= VECTOR1_DO;
+			else if (A[7:0] >= 8'h60 && A[7:0] <= 8'h6F) REG_DO <= !MATH_BANK ? MATH_OUT0_DO : MATH_OUT1_DO;
+			else                                         REG_DO <= '0;
 		else if (REG_MATH_SEL)
 			case ({A[3:2],2'b00})
 				4'h0,
-				4'h4: REG_DO = {28'h0000000,MATH_CTRL};
-				4'h8: REG_DO = {31'h00000000,MATH_ON};
-				4'hC: REG_DO = {26'h0000000,MATH_MODE};
-				default: REG_DO = '0;
+				4'h4: REG_DO <= {28'h0000000,MATH_CTRL};
+				4'h8: REG_DO <= {31'h00000000,MATH_ON};
+				4'hC: REG_DO <= {26'h0000000,MATH_MODE};
+				default: REG_DO <= '0;
 			endcase
 		else
-			REG_DO = '0;
+			REG_DO <= '0;
 	end
 	
 	wire CPU_DRAM0_SEL = (A >= 32'h00000000 && A <= 32'h000FFFFF && MSYS[6:5] != 2'b00 && !BOOT_ROM);
@@ -432,6 +424,8 @@ module MADAM
 		.CPU_GRANT(CPU_GRANT),
 		.CPU_READY(CPU_READY),
 		.CPU_AG_CTL(CPU_AG_CTL),
+		
+		.PBI(AG_PBI),
 		
 		.CLIO_REQ(CLIO_REQ),
 		.EXTP_REQ(EXTP_REQ),
@@ -467,6 +461,7 @@ module MADAM
 		.PLAYER_AG_CTL(PLAYER_AG_CTL),
 		
 		.BUS_STATE(BUS_STATE),
+		.BUS_PB(BUS_PB),
 		.DMA_CTL(DMA_CTL),
 		
 		.DBG_EXT(DBG_EXT)
@@ -499,10 +494,11 @@ module MADAM
 		.GRANT(CPU_GRANT),
 		.READY(CPU_READY),
 		.ACCESS(CPU_ACCESS),
+		.START(CPU_START),
 		.WE(CPU_WE),
+		.AG_PBI(AG_PBI),
 		.AG_CTL(CPU_AG_CTL),
 		
-		.PBI(AG_PBI),
 		.SLOW_SEL(0/*CPU_SLOW_SEL*/),
 		.CLIO_SEL(CPU_CLIO_SEL),
 		.CLIO_RDY(~CREADY_N),
@@ -526,10 +522,12 @@ module MADAM
 		
 		.MDTI(AG_MDTO),
 		.BUS_STATE(BUS_STATE),
+		.BUS_PB(BUS_PB),
 		.GRANT(EXTP_GRANT),
-		.AG_CTL(EXTP_AG_CTL),
 		.DMA_REG_OVF(AG_REG_OVF),
 		.DMA_REG_ZERO(AG_REG_ZERO),
+		.AG_PBI(AG_PBI),
+		.AG_CTL(EXTP_AG_CTL),
 		
 		.CPU_REQ(CLIO_REQ),
 		.DMA_REQ(EXTP_REQ),
@@ -580,6 +578,7 @@ module MADAM
 		
 		.CPU_ADDR(A_FF[23:2]),
 		.CPU_ACCESS(CPU_ACCESS),
+		.CPU_START(CPU_START),
 		.CPU_DRAM0_SEL(CPU_DRAM0_SEL),
 		.CPU_DRAM1_SEL(CPU_DRAM1_SEL),
 		.CPU_VRAM_SEL(CPU_VRAM_SEL),
@@ -660,6 +659,7 @@ module MADAM
 		.MWR(MWR),
 		.SEL(REG_SE_SEL),
 		.BUS_STATE(BUS_STATE),
+		.BUS_PB(BUS_PB),
 		.GRANT(SE_GRANT),
 		.DMA_REG_ZERO(AG_REG_ZERO),
 		.AG_CTL(SE_AG_CTL),
@@ -785,12 +785,13 @@ module MADAM
 	assign LPSC_N = ~SPORT_LSC;
 	assign RPSC_N = ~SPORT_RSC;
 	
-	assign DO = CPU_SLOW_SEL ? SLOW_MDTO :
-					REG_SE_SEL ? SE_MDTO :
-	            CPU_REG_SEL ? REG_DO : 
-					SE_GRANT ? SE_MDTO : 
+	assign DO = SE_GRANT ? SE_MDTO : 
 //					EXTP_GRANT ? EXTP_MDTO : '0;
 					PLAYER_GRANT ? PLAYER_MDTO : '0;
+					
+	assign CPU_DO = CPU_SLOW_SEL ? SLOW_MDTO :
+					    REG_SE_SEL ? SE_MDTO :
+	                CPU_REG_SEL ? REG_DO : '0;
 					
 	assign CLIO_OE = EXTP_GRANT;
 	assign SYSRAM_EN = ~BOOT_ROM;
