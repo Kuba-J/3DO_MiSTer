@@ -1,6 +1,6 @@
 module VE
 (
-	input              CLK,
+	input              MCLK,
 	input              VCLK,
 	input              RST_N,
 	input              EN,
@@ -28,13 +28,13 @@ module VE
 		VRST_N <= RST_N;
 	end 
 	
-	bit  DCLK_DIV;
+	bit  [ 1: 0] DCLK_DIV;
 	always @(posedge VCLK or negedge VRST_N) begin
 		if (!VRST_N) begin
 			DCLK_DIV <= '0;
 		end
 		else begin
-			DCLK_DIV <= ~DCLK_DIV;
+			DCLK_DIV <= DCLK_DIV + 2'd1;
 		end
 	end 
 	
@@ -49,7 +49,7 @@ module VE
 	bit          VSYNC;
 	bit          HBLK;
 	bit          VBLK;
-	always @(posedge VCLK or negedge VRST_N) begin
+	always @(posedge VCLK or negedge VRST_N) begin		
 		if (!VRST_N) begin
 			{HSTART,VSTART} <= '0;
 			LINE_BUF_RPOS <= '0;
@@ -61,7 +61,7 @@ module VE
 			DBG_HS_END <= 10'd11;
 		end
 		else begin
-			if (DCLK_DIV) begin
+			if (DCLK_DIV == 2'd3) begin
 				LINE_BUF_RPOS <= LINE_BUF_RPOS + 10'd1;
 					
 				HCNT <= HCNT + 10'd1;
@@ -111,12 +111,13 @@ module VE
 	assign VS_N = ~VSYNC;
 	assign HBLK_N = ~HBLK;
 	assign VBLK_N = ~VBLK;
-	assign DCLK = DCLK_DIV;
+	assign DCLK = (DCLK_DIV == 2'd3);
 	
 	
-	bit          HSTART_SYNC,VSTART_SYNC;
-	always @(posedge CLK) begin
-		{HSTART_SYNC,VSTART_SYNC} <= {HSTART,VSTART};
+	bit  [ 2: 0] HSTART_SYNC,VSTART_SYNC;
+	always @(posedge MCLK) begin
+		HSTART_SYNC <= {HSTART_SYNC[1:0],HSTART};
+		VSTART_SYNC <= {VSTART_SYNC[1:0],VSTART};
 	end
 	
 	bit  [ 9: 0] LINE_BUF_WPOS;
@@ -125,8 +126,7 @@ module VE
 	bit          HSYNC2;
 	bit          VSYNC2;
 	bit          EMPTY_DE;
-	always @(posedge CLK or negedge RST_N) begin
-		bit          HSTART_SYNC_OLD;
+	always @(posedge MCLK or negedge RST_N) begin
 		bit          HCNT_RES,VCNT_RES;
 		bit          DOT_CE;
 		bit          EMPTY_LINE;
@@ -174,13 +174,12 @@ module VE
 				end
 			end
 			
-			HSTART_SYNC_OLD <= HSTART_SYNC;
-			if (HSTART_SYNC && !HSTART_SYNC_OLD) begin
+			if (HSTART_SYNC == 3'b011) begin
 				LINE_BUF_WPOS <= '0;
 				EMPTY_LINE <= 1;
 				DOT_CE <= 1;
 				HCNT_RES <= 1;
-				VCNT_RES <= VSTART_SYNC;
+				VCNT_RES <= |VSTART_SYNC;
 			end
 			
 		end
@@ -191,7 +190,7 @@ module VE
 	
 	VE_LINE_BUF LINE_BUF
 	(
-		.CLK0(CLK),
+		.CLK0(MCLK),
 		.ADDR0({VCNT2[0],LINE_BUF_WPOS}),
 		.DATA0(AD),
 		.WREN0((DE | EMPTY_DE) & EN & VCE),
