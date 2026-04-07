@@ -1,30 +1,30 @@
 module sdram
 (
-	inout  reg [15:0] SDRAM_DQ,   // 16 bit bidirectional data bus
-	output reg [12:0] SDRAM_A,    // 13 bit multiplexed address bus
-	output reg        SDRAM_DQML, // byte mask
-	output reg        SDRAM_DQMH, // byte mask
-	output reg  [1:0] SDRAM_BA,   // two banks
-	output            SDRAM_nCS,  // a single chip select
-	output reg        SDRAM_nWE,  // write enable
-	output reg        SDRAM_nRAS, // row address select
-	output reg        SDRAM_nCAS, // columns address select
-	output            SDRAM_CLK,
-	output            SDRAM_CKE,
+	inout  reg [15: 0] SDRAM_DQ,   // 16 bit bidirectional data bus
+	output reg [12: 0] SDRAM_A,    // 13 bit multiplexed address bus
+	output reg         SDRAM_DQML, // byte mask
+	output reg         SDRAM_DQMH, // byte mask
+	output reg [ 1: 0] SDRAM_BA,   // two banks
+	output             SDRAM_nCS,  // a single chip select
+	output reg         SDRAM_nWE,  // write enable
+	output reg         SDRAM_nRAS, // row address select
+	output reg         SDRAM_nCAS, // columns address select
+	output             SDRAM_CLK,
+	output             SDRAM_CKE,
 
 	// cpu/chipset interface
-	input             init,			// init signal after FPGA config to initialize RAM
-	input             clk,			// sdram is accessed at up to 128MHz
-	input             sync,			//
+	input              init,			// init signal after FPGA config to initialize RAM
+	input              clk,			// sdram is accessed at up to 128MHz
+	input              sync,			//
 
-	input     [22: 2] addr,
-	input             wr,
-	input             rd,
-	input     [ 1: 0] we,
-	input     [15: 0] din,
-	output    [15: 0] dout,
+	input      [22: 2] addr,
+	input      [31: 0] din,
+	output     [31: 0] dout,
+	input      [ 3: 0] we,
+	input              ras,
+	input      [ 3: 0] code,
 	
-	input             rfs,
+	input              rfs,
 
 	output [1:0] dbg_ctrl_bank,
 	output [1:0] dbg_ctrl_cmd,
@@ -35,13 +35,16 @@ module sdram
 	output       dbg_out_read,
 	output       dbg_out_bank,
 	
-	output reg [15:0] dbg_sdram_d,
+	output reg [15: 0] dbg_sdram_d,
 	
-	output reg [31:0] dbg_no_refresh
+	output reg [31: 0] dbg_no_refresh,
+	
+	output reg [21:11] dbg_open_page,
+	output reg         dbg_cross_page
 );
 
 	localparam RASCAS_DELAY   = 3'd2; // tRCD=20ns -> 2 cycles
-	localparam BURST          = 3'd0; // 0=1, 1=2, 2=4, 3=8, 7=full page
+	localparam BURST          = 3'd1; // 0=1, 1=2, 2=4, 3=8, 7=full page
 	localparam ACCESS_TYPE    = 1'd0; // 0=sequential, 1=interleaved
 	localparam CAS_LATENCY    = 3'd2; // 2/3 allowed
 	localparam OP_MODE        = 2'd0; // only 0 (standard operation) allowed
@@ -95,12 +98,13 @@ module sdram
 	localparam CTRL_IDLE = 2'd0;
 	localparam CTRL_RAS = 2'd1;
 	localparam CTRL_CAS = 2'd2;
+	localparam CTRL_PRE = 2'd3;
 	
 	typedef struct packed
 	{
 		bit [ 1:0] CMD;	//command
 		bit [ 1:0] BANK;	//bank
-		bit [22:2] ADDR;	//read/write address
+		bit [22:1] ADDR;	//read/write address
 		bit [15:0] DATA;	//write data
 		bit        RD;		//read	
 		bit        WE;		//write enable
@@ -111,6 +115,7 @@ module sdram
 	reg [ 3: 0] st_num;
 //	reg [15: 0] data;
 	
+	reg ras_old;
 	always @(posedge clk) begin
 		reg sync_old;
 		
@@ -124,6 +129,8 @@ module sdram
 				st_num <= 4'd1;
 //				data <= din;
 			end
+			
+			ras_old <= ras;
 		end
 	end
 	
@@ -137,31 +144,62 @@ module sdram
 								                             CTRL_IDLE;
 			state[0].RFS <= 1;
 		end else begin
-			case (st_num[2:0])
-				3'd0: begin state[0].CMD  <= wr || rd ? CTRL_RAS : CTRL_IDLE;
-								state[0].ADDR <= addr;
-				            state[0].BANK <= 2'd0; end
-								  
-//				3'd1: begin state[0].CMD  <= CTRL_IDLE;
-//								state[0].RFS  <= rfs || (!wr && !rd); end
-								  
-				3'd2: begin state[0].CMD  <= rd ? CTRL_CAS : CTRL_IDLE;
-								state[0].ADDR <= addr;
-				            state[0].RD   <= rd;
-				            state[0].BANK <= 2'd0;
-								state[0].RFS  <= rfs || (!wr && !rd);  end
-								  
-				3'd4: begin state[0].CMD  <= wr ? CTRL_CAS : CTRL_IDLE;
-								state[0].ADDR <= addr;
-								state[0].DATA <= din;
-								state[0].WE   <= wr;
-								state[0].BE   <= we;
-								state[0].BANK <= 2'd0;  end
-								
-				3'd7: begin if (!wr && !rd) dbg_no_refresh <= '0; end
-								
+			if (ras && code == 4'hA) begin
+				case (st_num[2:0])
+				3'd6 : begin state[0].CMD  <= CTRL_RAS;
+							 	 state[0].ADDR <= {addr,1'b0};
+				             state[0].BANK <= 2'd0; end
 				default:;
-			endcase
+				endcase
+				dbg_cross_page <= 0;
+				dbg_open_page <= addr[21:11];
+			end
+			else if (ras && code == 4'h0) begin
+				case (st_num[2:0])
+				3'd0 : begin state[0].CMD  <= CTRL_CAS;
+								 state[0].ADDR <= {addr,1'b0};
+								 state[0].RD   <= 1;
+								 state[0].BANK <= 2'd0; end
+				default:;
+				endcase
+			end
+			else if (ras && code == 4'h2) begin
+				dbg_cross_page <= (dbg_open_page != addr[21:11]);
+			end
+			else if (ras && code == 4'h3) begin
+				case (st_num[2:0])
+				3'd4 : begin state[0].CMD  <= CTRL_CAS;
+								 state[0].ADDR <= {addr,1'b0};
+								 state[0].WE   <= 1;
+								 state[0].BE   <= we[3:2];
+								 state[0].DATA <= din[31:16];
+				             state[0].BANK <= 2'd0;  end
+				3'd5 : begin state[0].CMD  <= CTRL_CAS;
+								 state[0].ADDR <= {addr,1'b1};
+								 state[0].WE   <= 1;
+								 state[0].BE   <= we[1:0];
+								 state[0].DATA <= din[15:0];
+				             state[0].BANK <= 2'd0;  end
+				default:;
+				endcase
+				dbg_cross_page <= (dbg_open_page != addr[21:11]);
+			end
+//			else if (ras && (code == 4'h6 || code == 4'hE)) begin
+			else if (!ras && !ras_old && (code == 4'h2 || code == 4'h3)) begin
+				case (st_num[2:0])
+				3'd4 : begin state[0].CMD  <= CTRL_RAS;
+								 state[0].BANK <= 2'd0;
+								 state[0].RFS  <= 1;  end
+				default:;
+				endcase
+			end
+			else if (!ras && ras_old) begin
+				case (st_num[2:0])
+				3'd0 : begin state[0].CMD  <= CTRL_PRE;
+				             state[0].BANK <= 2'd0;  end
+				default:;
+				endcase
+			end
 		end
 	end
 	always @(posedge clk) begin
@@ -173,7 +211,7 @@ module sdram
 	end
 	
 	wire [ 1:0] ctrl_cmd   = state[0].CMD;
-	wire [22:2] ctrl_addr  = state[0].ADDR;
+	wire [22:1] ctrl_addr  = state[0].ADDR;
 	wire [15:0] ctrl_data  = state[0].DATA;
 //	wire        ctrl_rd    = state[0].RD;
 	wire        ctrl_we    = state[0].WE;
@@ -181,16 +219,18 @@ module sdram
 	wire [ 1:0] ctrl_bank  = state[0].BANK;
 	wire        ctrl_rfs   = state[0].RFS;
 	
-	wire       data_read = state[3].RD;
-	wire       out_read  = state[4].RD;
-	wire       out_bank  = state[4].BANK[0];
+	wire       data_read0 = state[3].RD;
+	wire       data_read1  = state[4].RD;
+	wire       out_read0  = state[4].RD;
+	wire       out_read1  = state[5].RD;
+	wire       out_bank  = state[5].BANK[0];
 	
-	reg [15:0] rbuf;
+	reg [31:0] rbuf;
 	always @(posedge clk) begin
-		if (data_read) rbuf <= SDRAM_DQ;
-//		if (out_read) dout <= rbuf;
+		rbuf <= {rbuf[15:0],SDRAM_DQ};
+		if (out_read1) dout <= rbuf;
 	end
-	assign dout = rbuf;
+//	assign dout = rbuf;
 	
 
 	localparam CMD_NOP             = 3'b111;
@@ -203,19 +243,18 @@ module sdram
 	localparam CMD_LOAD_MODE       = 3'b000;
 	
 	// SDRAM state machines
-	wire [21:1] a = ctrl_addr;
+	wire [22:1] a = ctrl_addr;
 	wire [15:0] d = ctrl_data;
 	wire  [1:0] dqm = ~ctrl_be;
-	wire        ra10 = 1;
-	wire        wa10 = 1;
 	always @(posedge clk) begin
 		if (ctrl_cmd == CTRL_RAS || ctrl_cmd == CTRL_CAS) SDRAM_BA <= (mode == MODE_NORMAL) ? ctrl_bank : 2'b00;
 
 		casex({init_done,ctrl_rfs,ctrl_we,mode,ctrl_cmd})
 			{3'bX0X, MODE_NORMAL, CTRL_RAS}: {SDRAM_nRAS, SDRAM_nCAS, SDRAM_nWE, SDRAM_nCS} <= {CMD_ACTIVE,1'b0};
-			{3'bX1X, MODE_NORMAL, 2'bXX   }: {SDRAM_nRAS, SDRAM_nCAS, SDRAM_nWE, SDRAM_nCS} <= {CMD_AUTO_REFRESH,1'b0};
+			{3'bX1X, MODE_NORMAL, CTRL_RAS}: {SDRAM_nRAS, SDRAM_nCAS, SDRAM_nWE, SDRAM_nCS} <= {CMD_AUTO_REFRESH,1'b0};
 			{3'b101, MODE_NORMAL, CTRL_CAS}: {SDRAM_nRAS, SDRAM_nCAS, SDRAM_nWE, SDRAM_nCS} <= {CMD_WRITE,1'b0};
 			{3'b100, MODE_NORMAL, CTRL_CAS}: {SDRAM_nRAS, SDRAM_nCAS, SDRAM_nWE, SDRAM_nCS} <= {CMD_READ,1'b0};
+			{3'b10X, MODE_NORMAL, CTRL_PRE}: {SDRAM_nRAS, SDRAM_nCAS, SDRAM_nWE, SDRAM_nCS} <= {CMD_PRECHARGE,1'b0};
 
 			// init
 			{3'bXXX,    MODE_LDM, CTRL_RAS}: {SDRAM_nRAS, SDRAM_nCAS, SDRAM_nWE, SDRAM_nCS} <= {CMD_LOAD_MODE, 1'b0};
@@ -232,9 +271,10 @@ module sdram
 
 		if (mode == MODE_NORMAL) begin
 			casex ({ctrl_we,ctrl_cmd})
-				{1'bX,CTRL_RAS}: SDRAM_A <= {1'b0,a[21:10]};
-				{1'b0,CTRL_CAS}: SDRAM_A <= {2'b00,ra10,1'b0,a[9:1]};
-				{1'b1,CTRL_CAS}: SDRAM_A <= {dqm  ,wa10,1'b0,a[9:1]};
+				{1'bX,CTRL_RAS}: SDRAM_A <= {1'b0,a[22:11]};
+				{1'b0,CTRL_CAS}: SDRAM_A <= {2'b00,1'b0,a[10:1]};
+				{1'b1,CTRL_CAS}: SDRAM_A <= {dqm  ,1'b0,a[10:1]};
+				{1'bX,CTRL_PRE}: SDRAM_A <= {2'b00,1'b0,10'b0000000000};
 			endcase;
 		end
 		else if (mode == MODE_LDM && ctrl_cmd == CTRL_RAS) SDRAM_A <= MODE;
@@ -251,8 +291,8 @@ module sdram
 	assign dbg_ctrl_cmd = ctrl_cmd;
 	assign dbg_ctrl_we = ctrl_we;
 	assign dbg_ctrl_rfs = ctrl_rfs;
-	assign dbg_data_read = data_read;
-	assign dbg_out_read = out_read;
+	assign dbg_data_read = data_read0;
+	assign dbg_out_read = out_read0;
 	assign dbg_out_bank = out_bank;
 
 	altddio_out

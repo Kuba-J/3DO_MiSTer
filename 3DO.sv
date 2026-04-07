@@ -47,6 +47,7 @@ module emu
 	output        VGA_F1,
 	output [1:0]  VGA_SL,
 	output        VGA_SCALER, // Force VGA scaler
+	output        VGA_DISABLE, // analog out is off
 
 	input  [11:0] HDMI_WIDTH,
 	input  [11:0] HDMI_HEIGHT,
@@ -186,6 +187,7 @@ module emu
 	assign LED_POWER = 0;
 	assign LED_USER  = bios_download;
 	assign VGA_SCALER= 0;
+	assign VGA_DISABLE = 0;
 	
 //	assign {SDRAM2_DQ, SDRAM2_CLK,SDRAM2_A,SDRAM2_BA,SDRAM2_nCS,SDRAM2_nCAS,SDRAM2_nRAS,SDRAM2_nWE} = 'Z;
 	
@@ -362,8 +364,11 @@ module emu
 //		end
 //	end
 	
-	wire reset = RESET | status[0] | buttons[1] | bios_download;
-	wire mem_rst = RESET | status[0] | buttons[1];
+	reg reset = 1, mem_rst = 1;
+	always @(posedge clk_sys) begin
+		reset <= RESET | status[0] | buttons[1] | bios_download;
+		mem_rst <= RESET | status[0] | buttons[1];
+	end
 	
 	wire [15:0] joy0_data = {1'b1, 2'b00, joystick_0[2], joystick_0[3], joystick_0[0], joystick_0[1], joystick_0[4], joystick_0[5], joystick_0[6], joystick_0[7], joystick_0[8], joystick_0[9], joystick_0[10], 2'b00};
 	wire [15:0] joy1_data = {1'b1, 2'b00, joystick_1[2], joystick_1[3], joystick_1[0], joystick_1[1], joystick_1[4], joystick_1[5], joystick_1[6], joystick_1[7], joystick_1[8], joystick_1[9], joystick_1[10], 2'b00};
@@ -394,16 +399,23 @@ module emu
 	reg  [ 3: 0] BRAM_OFFS;
 	reg          NEED_DSP_PAUSE;
 	always @(posedge clk_sys) begin
-		reg [31: 0] id;
+		reg [31: 0] msf,id;
 	
 		if (cdd_info_download && ioctl_wr) begin
+			if (ioctl_addr == 25'h004) begin
+				msf[31:16] <= {ioctl_data[7:0],ioctl_data[15:8]};
+			end 
+			if (ioctl_addr == 25'h006) begin
+				msf[15:0] <= {ioctl_data[7:0],ioctl_data[15:8]};
+			end 
+			
 			if (ioctl_addr == 25'h458) begin
 				id[31:16] <= {ioctl_data[7:0],ioctl_data[15:8]};
 			end 
-			else if (ioctl_addr == 25'h45A) begin
+			if (ioctl_addr == 25'h45A) begin
 				id[15:0] <= {ioctl_data[7:0],ioctl_data[15:8]};
 			end 
-			else if (ioctl_addr == 25'h480) begin
+			if (ioctl_addr == 25'h480) begin
 				BRAM_OFFS <= 4'h0;
 				NEED_DSP_PAUSE <= 0;
 				if (id == 32'h274E924C) BRAM_OFFS <= 4'h2;//Alone in the Dark (US)
@@ -414,21 +426,13 @@ module emu
 				if (id == 32'h06DE0DC2) BRAM_OFFS <= 4'hA;//Road & Track Presents - The Need for Speed (US, EU)
 				if (id == 32'h2D95DCB6) BRAM_OFFS <= 4'h6;//Seal of the Pharaoh (US)
 				
-				if (id == 32'h25609184) NEED_DSP_PAUSE <= 1;//Blade Force (US)
-				if (id == 32'h043DCD69) NEED_DSP_PAUSE <= 1;//Decathlon (US) (Unl)
-				if (id == 32'h0A9B739E) NEED_DSP_PAUSE <= 1;//Killing Time (US) (RE1)
+				if (id == 32'h25609184                       ) NEED_DSP_PAUSE <= 1;//Blade Force (US)
+				if (id == 32'h043DCD69 && msf == 32'h69026900) NEED_DSP_PAUSE <= 1;//Decathlon (US) (Unl)
+				if (id == 32'h0A9B739E                       ) NEED_DSP_PAUSE <= 1;//Killing Time (US) (RE1)
+				if (id == 32'h06065D10                       ) NEED_DSP_PAUSE <= 1;//Snow Job Starring Tracy Scoggins (US)
 			end
 		end
 	end
-//	always @(posedge clk_sys) begin
-//		case (status[10:8])
-//			3'h0: BRAM_OFFS <= 4'h0;
-//			3'h1: BRAM_OFFS <= 4'h4;
-//			3'h2: BRAM_OFFS <= 4'h6;
-//			3'h3: BRAM_OFFS <= 4'h8;
-//			3'h4: BRAM_OFFS <= 4'hA;
-//		endcase
-//	end
 	
 	wire [23: 2] LA;
 	wire         LRAS0_N;
@@ -663,7 +667,7 @@ module emu
 	);
 	
 	
-	wire [15:0] sdr1_dout;
+	wire [31:0] sdr_dout;
 	sdram sdram1
 	(
 		.SDRAM_CLK(SDRAM_CLK),
@@ -683,43 +687,15 @@ module emu
 		.sync(MCLK_CE),
 	
 		.addr({2'b00,~LRAS3_N,LA[19:2]}),
-		.wr  (!LRAS2_N || !LRAS3_N ? LCODE[0]                  : 1'b0),
-		.rd  (!LRAS2_N || !LRAS3_N ? ~LCODE[0]                 : 1'b0),
-		.we  (!LRAS2_N || !LRAS3_N ? ~LWE_N                    : 2'b00),
-		.din  (RAM_DO[31:16]),
-		.dout(sdr1_dout),
+		.din  (RAM_DO),
+		.dout(sdr_dout),
+		.we  ({~LWE_N,~RWE_N}),
+		.ras(!LRAS2_N || !LRAS3_N || !RRAS2_N || !RRAS3_N),
+		.code({3'b000,RCODE[0]} | LCODE),
 		
 		.rfs(1'b0)
 	);
 	
-	wire [15:0] sdr2_dout;
-	sdram sdram2
-	(
-		.SDRAM_CLK(SDRAM2_CLK),
-		.SDRAM_A(SDRAM2_A),
-		.SDRAM_BA(SDRAM2_BA),
-		.SDRAM_DQ(SDRAM2_DQ),
-		.SDRAM_DQML(),
-		.SDRAM_DQMH(),
-		.SDRAM_nCS(SDRAM2_nCS),
-		.SDRAM_nWE(SDRAM2_nWE),
-		.SDRAM_nRAS(SDRAM2_nRAS),
-		.SDRAM_nCAS(SDRAM2_nCAS),
-		.SDRAM_CKE(),
-		
-		.clk(clk_mem),
-		.init(status[0]),
-		.sync(MCLK_CE),
-	
-		.addr({2'b00,~RRAS3_N,RA[19:2]}),
-		.wr  (!RRAS2_N || !RRAS3_N ? RCODE[0]  : 1'b0),
-		.rd  (!RRAS2_N || !RRAS3_N ? ~RCODE[0] : 1'b0),
-		.we  (!RRAS2_N || !RRAS3_N ? ~RWE_N    : 2'b00),
-		.din  (RAM_DO[15:0]),
-		.dout(sdr2_dout),
-		
-		.rfs(1'b0)
-	);
 
 	bit  [31: 0] VRAM_Q;
 	bit          VRAM_LRDY,VRAM_RRDY;
@@ -792,7 +768,7 @@ module emu
 		.BRAM_OFFS(BRAM_OFFS)
 	);
 	
-	assign RAM_DI = !LRAS0_N || !RRAS0_N ? VRAM_Q : {sdr1_dout,sdr2_dout};
+	assign RAM_DI = !LRAS0_N || !RRAS0_N ? VRAM_Q : sdr_dout;
 	assign PDI = !SRAMR_N ? {24'h000000,NVRAM_Q} : ddr_io_do;
 
 	
@@ -986,7 +962,7 @@ module emu
 	assign VGA_F1 = FIELD;
 	
 	wire vga_de;
-	video_mixer #(.LINE_LENGTH(640+8), .HALF_DEPTH(0), .GAMMA(0)) video_mixer
+	video_mixer #(.LINE_LENGTH(640+8), .HALF_DEPTH(0), .GAMMA(1)) video_mixer
 	(
 		.*,
 	
