@@ -192,7 +192,7 @@ module emu
 //	assign {SDRAM2_DQ, SDRAM2_CLK,SDRAM2_A,SDRAM2_BA,SDRAM2_nCS,SDRAM2_nCAS,SDRAM2_nRAS,SDRAM2_nWE} = 'Z;
 	
 	///////////////////////  CLOCK/RESET  ///////////////////////////////////
-	wire clk_sys, clk_mem, clk_vid, locked;
+	wire clk_sys, clk_mem, locked;
 
 	pll pll
 	(
@@ -200,9 +200,82 @@ module emu
 		.rst(0),
 		.outclk_0(clk_sys),
 		.outclk_1(clk_mem),
-		.outclk_2(clk_vid),
+		.outclk_2(),
 		.locked(locked)
 	);
+
+	wire clk_vid;
+	pll2 pll2
+	(
+		.refclk(CLK_50M),
+		.rst(0),
+		.outclk_0(clk_vid),
+		.reconfig_to_pll(reconfig_to_pll),
+		.reconfig_from_pll(reconfig_from_pll), 
+		.locked()
+	);
+	
+	wire [63:0] reconfig_to_pll;
+	wire [63:0] reconfig_from_pll;
+	wire        cfg_waitrequest;
+	reg         cfg_write;
+	reg   [5:0] cfg_address;
+	reg  [31:0] cfg_data;
+	
+	pll_cfg pll_cfg
+	(
+		.mgmt_clk(CLK_50M),
+		.mgmt_reset(0),
+		.mgmt_waitrequest(cfg_waitrequest),
+		.mgmt_read(0),
+		.mgmt_readdata(),
+		.mgmt_write(cfg_write),
+		.mgmt_address(cfg_address),
+		.mgmt_writedata(cfg_data),
+		.reconfig_to_pll(reconfig_to_pll),
+		.reconfig_from_pll(reconfig_from_pll)
+	);
+
+	always @(posedge CLK_50M) begin
+		reg pald = 0, pald2 = 0;
+		reg resd = 0, resd2 = 0;
+		reg [2:0] state = 0;
+
+		pald  <= 0;//PAL;
+		pald2 <= pald;
+		
+		resd  <= reset;
+		resd2 <= resd;
+	
+		if (pald2 != pald || (resd && !resd2)) state <= 1;
+	
+		cfg_write <= 0;
+		if (!cfg_waitrequest) begin
+			if (state) state <= state + 1'd1;
+			case (state)
+				1: begin
+						cfg_address <= 0;
+						cfg_data <= 0;
+						cfg_write <= 1;
+					end
+				3: begin
+						cfg_address <= 5;
+						cfg_data <= !pald2 ? 32'h00020504 : 32'h00020403;
+						cfg_write <= 1;
+					end
+				5: begin
+						cfg_address <= 7;
+						cfg_data <= !pald2 ? 32'hD61AA39A : 32'h428F5C29;
+						cfg_write <= 1;
+					end
+				7: begin
+						cfg_address <= 2;
+						cfg_data <= 0;
+						cfg_write <= 1;
+					end
+			endcase
+		end
+	end 
 
 	///////////////////////////////////////////////////
 	
@@ -211,15 +284,15 @@ module emu
 	// 0         1         2         3          4         5         6   
 	// 01234567890123456789012345678901 23456789012345678901234567890123
 	// 0123456789ABCDEFGHIJKLMNOPQRSTUV 0123456789ABCDEFGHIJKLMNOPQRSTUV
-	// XXXXXXXXXXX XXX                  XXXXXX                          
+	// XXXXXXXXXXX XXXXX                XXXXXX                          
 	
 	`include "build_id.v"
 	localparam CONF_STR = {
 		"3DO;;",
 		"S0,CUEISO,Insert Disk;",
 		"FS2,BIN,Load bios;",
-//		"-;",
-//		"OF,Load from CD,No,Yes;",
+		"-;",
+		"OFG,Region,BIOS,NTSC,PAL;",
 
 		"-;",
 		"D0RC,Load Backup RAM;",
@@ -237,9 +310,9 @@ module emu
 		"P1O67,Composite Blend,Off,On,Adaptive;",
 	
 		"P2,Input;",
-		"P2O[34:32],Pad 1,Digital,Mouse,Flightstick,Off;",
-		"P2-;",
-		"d1P2O[37:35],Pad 2,Digital,Mouse,Flightstick,Off;",
+		"P2O[34:32],Pad,No,1,2,3,4;",
+		"D1P2O[35],Flightstick,No,Yes;",
+		"D2P2O[36],Mouse,No,Yes;",
 		"P2-;",
 
 //		"P3,Hardware;",
@@ -253,7 +326,7 @@ module emu
 	};
 
 	wire [63:0] status;
-	wire [15:0] status_menumask = {14'd0, (status[34:32] == 3'd0), ~bk_ena};
+	wire [15:0] status_menumask = {13'd0,mouse_mask,~stick_mask,~bk_ena};
 	
 	wire  [1:0] buttons;
 	wire [12:0] joystick_0,joystick_1,joystick_2,joystick_3,joystick_4;
@@ -370,9 +443,6 @@ module emu
 		mem_rst <= RESET | status[0] | buttons[1];
 	end
 	
-	wire [15:0] joy0_data = {1'b1, 2'b00, joystick_0[2], joystick_0[3], joystick_0[0], joystick_0[1], joystick_0[4], joystick_0[5], joystick_0[6], joystick_0[7], joystick_0[8], joystick_0[9], joystick_0[10], 2'b00};
-	wire [15:0] joy1_data = {1'b1, 2'b00, joystick_1[2], joystick_1[3], joystick_1[0], joystick_1[1], joystick_1[4], joystick_1[5], joystick_1[6], joystick_1[7], joystick_1[8], joystick_1[9], joystick_1[10], 2'b00};
-	
 
 `ifdef DEBUG
 `define USE_BRAM_BLOCKS_FOR_VRAM 0
@@ -380,7 +450,52 @@ module emu
 `define USE_BRAM_BLOCKS_FOR_VRAM 1
 `endif
 
+	reg          PAL = 0;
+	always @(posedge clk_sys) begin
+		reg  [31: 0] cs;
+		reg bios_download_old;
+		reg bios_pal = 0;
+	
+		bios_download_old <= bios_download;
+		
+		if (bios_download && !bios_download_old) begin
+			cs <= '0;
+		end 
+		
+		if (bios_download && ioctl_wr) begin
+			cs <= cs + {16'h0000,ioctl_data};
+		end
+		if (!bios_download && bios_download_old) begin
+			bios_pal <= (cs == 32'hD63EC5E9 || //Panasonic FZ-1 (E)
+			             cs == 32'hD5CFD1C5);  //Panasonic FZ-1 (E) (unencrypted)
+		end 
+		
+		case (status[16:15])
+			2'h0: PAL <= bios_pal;
+			2'h1: PAL <= 0;
+			default: PAL <= 1;
+		endcase
+	end
+	
+	reg new_vmode;
+	always @(posedge clk_sys) begin
+		reg old_pal;
+		int to;
+		
+		if(!reset) begin
+			old_pal <= PAL;
+			if(old_pal != PAL) to <= 5000000;
+		end
+		else to <= 5000000;
+		
+		if(to) begin
+			to <= to - 1;
+			if(to == 1) new_vmode <= ~new_vmode;
+		end
+	end
+
 	/*Frambuffer position in games:
+	3D Atlas (US): 0x2CC000
 	Alone in the Dark (US): 0x248800
 	Cannon Fodder (US): 0x2AE800/0x2D2800
 	Casper (US): 0x200000/0x225800/0x24B000
@@ -391,6 +506,8 @@ module emu
 	Quarantine (US): 0x274BA4
 	Road & Track Presents - The Need for Speed (US, EU): 0x2AD000/0x2D3000
 	Seal of the Pharaoh (US): 0x270800/0x296000
+	Live! 3DO Magazine CD-ROM 1 (Japan): 0x280000/0x2A5800
+	Pretty Soldier SailorMoon S (Japan): 0x24C000 (FMV only)
 	Most others: 0x200000/0x225800
 	*/
 	
@@ -418,6 +535,7 @@ module emu
 			if (ioctl_addr == 25'h480) begin
 				BRAM_OFFS <= 4'h0;
 				NEED_DSP_PAUSE <= 0;
+				if (id == 32'h29E4D882) BRAM_OFFS <= 4'hA;//3D Atlas (US)
 				if (id == 32'h274E924C) BRAM_OFFS <= 4'h2;//Alone in the Dark (US)
 				if (id == 32'h0340842C) BRAM_OFFS <= 4'hA;//Cannon Fodder (US)
 				if (id == 32'h2D731C98) BRAM_OFFS <= 4'hA;//FIFA International Soccer (US, Korea)
@@ -513,7 +631,7 @@ module emu
 		.CLK(clk_sys),
 		.RST_N(1),
 		.IN_CLK(in_clk),
-		.OUT_CLK(24545400),
+		.OUT_CLK(/*!PAL ?*/ 24545400 /*: 29500000*/),
 		.CE(VCE)
 	);
 	
@@ -541,6 +659,8 @@ module emu
 		.EN(1),
 		.PAUSE(pause),
 		.DSP_PAUSE(pause & NEED_DSP_PAUSE),
+		
+		.PAL(PAL),
 		
 		.CE_F(SYS_CE_F),
 		.CE_R(SYS_CE_R),
@@ -644,164 +764,13 @@ module emu
 		.EXT_BUS(EXT_BUS)
 	);
 	
-	wire [ 2: 0] pad1_sel = status[34:32];
-	wire [ 2: 0] pad2_sel = status[37:35];
-	wire [ 2: 0] pad2_eff = (pad1_sel == 3'd0) ? pad2_sel : 3'd3;
-	wire         pad_latch;
 	
-	function automatic [7:0] stick_axis(input signed [7:0] axis);
-		reg signed [8:0] v;
-		begin
-			v = {axis[7],axis} + 9'd128;
-			stick_axis = v[7:0];
-		end
-	endfunction
-
-	function automatic signed [10:0] mouse_delta(input ovf, input sign, input [7:0] data);
-		begin
-			if (ovf) mouse_delta = sign ? -11'sd1024 : 11'sd1022;
-			else     mouse_delta = $signed({sign,sign,sign,data}) <<< 1;
-		end
-	endfunction
-
-	function automatic signed [10:0] mouse_limit(input signed [11:0] axis);
-		begin
-			if (axis > 12'sd1023) mouse_limit = 11'sd1023;
-			else if (axis < -12'sd1024) mouse_limit = -11'sd1024;
-			else mouse_limit = axis[10:0];
-		end
-	endfunction
-
-	function automatic signed [9:0] mouse_step(input signed [10:0] axis);
-		begin
-			if (axis > 11'sd96) mouse_step = 10'sd96;
-			else if (axis < -11'sd96) mouse_step = -10'sd96;
-			else mouse_step = axis[9:0];
-		end
-	endfunction
-	
-	wire [7:0] stick0_x = stick_axis($signed(joy0_x0));
-	wire [7:0] stick0_y = stick_axis($signed(joy0_y0));
-	wire [7:0] stick0_z = stick_axis($signed(joy0_y1));
-	wire [7:0] stick1_x = stick_axis($signed(joy1_x0));
-	wire [7:0] stick1_y = stick_axis($signed(joy1_y0));
-	wire [7:0] stick1_z = stick_axis($signed(joy1_y1));
-	
-	wire [7:0] mouse_flags = ps2_mouse[7:0];
-	wire       mouse_ena = (pad1_sel == 3'd1) || (pad2_eff == 3'd1);
-	wire signed [10:0] mouse_dx = mouse_delta(mouse_flags[6], mouse_flags[4], ps2_mouse[15:8]);
-	wire signed [10:0] mouse_dy = mouse_delta(mouse_flags[7], mouse_flags[5], ps2_mouse[23:16]);
-	
-	reg mouse_toggle = 0;
-	reg mouse_left = 0;
-	reg mouse_middle = 0;
-	reg mouse_right = 0;
-	reg signed [10:0] mouse_x_acc = '0;
-	reg signed [10:0] mouse_y_acc = '0;
-	wire signed [9:0] mouse_x = mouse_step(mouse_x_acc);
-	wire signed [9:0] mouse_y = mouse_step(mouse_y_acc);
-	always @(posedge clk_sys) begin
-		reg signed [11:0] x;
-		reg signed [11:0] y;
-
-		if (reset || !mouse_ena) begin
-			mouse_toggle <= ps2_mouse[24];
-			mouse_left <= 1'b0;
-			mouse_middle <= 1'b0;
-			mouse_right <= 1'b0;
-			mouse_x_acc <= '0;
-			mouse_y_acc <= '0;
-		end else begin
-			x = {mouse_x_acc[10],mouse_x_acc};
-			y = {mouse_y_acc[10],mouse_y_acc};
-
-			if (pad_latch) begin
-				x = x - $signed({{2{mouse_x[9]}},mouse_x});
-				y = y - $signed({{2{mouse_y[9]}},mouse_y});
-			end
-
-			if (ps2_mouse[24] != mouse_toggle) begin
-				mouse_toggle <= ps2_mouse[24];
-				mouse_left <= ps2_mouse[0];
-				mouse_middle <= ps2_mouse[2];
-				mouse_right <= ps2_mouse[1];
-				x = x + $signed({mouse_dx[10],mouse_dx});
-				y = y - $signed({mouse_dy[10],mouse_dy});
-			end
-
-			mouse_x_acc <= mouse_limit(x);
-			mouse_y_acc <= mouse_limit(y);
-		end
-	end
-	
-	wire [31:0] mouse_data = {
-		8'h49,
-		mouse_left,
-		mouse_middle,
-		mouse_right,
-		1'b0,
-		mouse_y[9:0],
-		mouse_x[9:0]
-	};
-	
-	wire [87:0] mouse_data_p = {
-		mouse_data,
-		56'hFFFFFFFFFFFFFF
-	};
-	
-	wire [87:0] pad_data = {
-		{pad1_sel == 3'd0 ? joy0_data : 16'hFFFF,
-		 pad2_eff == 3'd0 ? joy1_data : 16'hFFFF},
-		56'hFFFFFFFFFFFFFF
-	};
-	
-	wire [71:0] stick0_data = {
-		8'h01,
-		8'h7B,
-		8'h08,
-		stick0_x,
-		2'b00,
-		stick0_y,
-		2'b00,
-		stick0_z,
-		4'h2,
-		{joystick_0[11], joystick_0[4], joystick_0[5], joystick_0[6], joystick_0[3], joystick_0[2], joystick_0[0], joystick_0[1]},
-		{joystick_0[7], joystick_0[8], joystick_0[10], joystick_0[9], 4'b0000}
-	};
-	wire [71:0] stick1_data = {
-		8'h01,
-		8'h7B,
-		8'h08,
-		stick1_x,
-		2'b00,
-		stick1_y,
-		2'b00,
-		stick1_z,
-		4'h2,
-		{joystick_1[11], joystick_1[4], joystick_1[5], joystick_1[6], joystick_1[3], joystick_1[2], joystick_1[0], joystick_1[1]},
-		{joystick_1[7], joystick_1[8], joystick_1[10], joystick_1[9], 4'b0000}
-	};
-	wire [87:0] stick0_data_p = {
-		stick0_data,
-		16'hFFFF
-	};
-	wire [87:0] pad1_mouse_data = {
-		joy0_data,
-		mouse_data,
-		40'hFFFFFFFFFF
-	};
-	wire [87:0] pad1_stick_data = {joy0_data, stick1_data};
-	
-	wire [87:0] PAD12_DATA = 
-		(pad2_eff == 3'd1) ? pad1_mouse_data :
-		(pad2_eff == 3'd2) ? pad1_stick_data :
-		(pad1_sel == 3'd1) ? mouse_data_p :
-		(pad1_sel == 3'd2) ? stick0_data_p :
-		pad_data;
+	wire stick_mask = ~(status[34:32] <= 3'd1);
+	wire mouse_mask = ~(status[34:32] <= 3'd2);
 	
 	HPS2PAD pad
 	(
-		.RST_N(~reset),
+		.RST(reset),
 		.CLK(clk_sys),
 		
 		.CE(CE_R),
@@ -812,9 +781,24 @@ module emu
 		
 		.EXPBDIN(1'b1),
 		.EXPBDOUT(),
-		.PAD_LATCH(pad_latch),
 	
-		.PAD_DATA(PAD12_DATA)
+		.PAD_SEL(status[34:32]),
+		.STICK_EN(status[35]&~stick_mask),
+		.MOUSE_EN(status[36]&~mouse_mask),
+	
+		.joystick_0(joystick_0),
+		.joystick_1(joystick_1),
+		.joystick_2(joystick_2),
+		.joystick_3(joystick_3),
+		.joy0_x0(joy0_x0),
+		.joy0_y0(joy0_y0),
+		.joy0_x1(joy0_x1),
+		.joy0_y1(joy0_y1),
+		.joy1_x0(joy1_x0),
+		.joy1_y0(joy1_y0),
+		.joy1_x1(joy1_x1),
+		.joy1_y1(joy1_y1),
+		.ps2_mouse(ps2_mouse)
 	);
 	
 	
@@ -837,14 +821,20 @@ module emu
 		.init(status[0]),
 		.sync(MCLK_CE),
 	
-		.addr({2'b00,~LRAS3_N,LA[19:2]}),
+		.laddr({2'b00,~LRAS3_N,LA[19:2]}),
+		.lwe  (~LWE_N),
+		.lras(!LRAS2_N || !LRAS3_N),
+		.lcode(LCODE),
+		
+		.raddr({2'b00,~RRAS3_N,RA[19:2]}),
+		.rwe  (~RWE_N),
+		.rras(!RRAS2_N || !RRAS3_N),
+		.rcode(RCODE),
+		
 		.din  (RAM_DO),
 		.dout(sdr_dout),
-		.we  ({~LWE_N,~RWE_N}),
-		.ras(!LRAS2_N || !LRAS3_N || !RRAS2_N || !RRAS3_N),
-		.code({3'b000,RCODE[0]} | LCODE),
 		
-		.rfs(!LRAS0_N || !RRAS0_N)
+		.rfs(!LRAS0_N || !RRAS0_N )
 	);
 	
 
@@ -1079,26 +1069,6 @@ module emu
 	
 
 	////////////////////////////////////////////////////////////////
-	wire PAL = 0;
-	
-	reg new_vmode;
-	always @(posedge clk_sys) begin
-		reg old_pal;
-		int to;
-		
-		if(!reset) begin
-			old_pal <= PAL;
-			if(old_pal != PAL) to <= 5000000;
-		end
-		else to <= 5000000;
-		
-		if(to) begin
-			to <= to - 1;
-			if(to == 1) new_vmode <= ~new_vmode;
-		end
-	end
-	
-	
 	wire [ 2: 0] scale = status[3:1];
 	reg          forced_scandoubler_sync;
 	reg  [ 2: 0] scale_sync;

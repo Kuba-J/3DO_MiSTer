@@ -5,6 +5,8 @@ module VE
 	input              RST_N,
 	input              EN,
 	
+	input              PAL,
+	
 	input              VCE,
 	input      [23: 0] AD,
 	input              DE,
@@ -23,9 +25,11 @@ module VE
 	output     [ 9: 0] DBG_HS_START,DBG_HS_END
 );
 
-	bit  VRST_N;
+	bit          VRST_N;
+	bit  [ 1: 0] PAL_SYNC;
 	always @(posedge VCLK) begin
 		VRST_N <= RST_N;
+		PAL_SYNC <= {PAL_SYNC[0],PAL};
 	end 
 	
 	bit  [ 1: 0] DCLK_DIV;
@@ -38,6 +42,10 @@ module VE
 		end
 	end 
 	
+	wire [ 8: 0] LINE_NUM = !PAL_SYNC[1] ? 9'd263 : 9'd313;
+	wire [ 9: 0] DOT_NUM = !PAL_SYNC[1] ? 10'd780 : 10'd784;//10'd942;
+	wire [ 8: 0] SCREEN_START = !PAL_SYNC[1] ? 9'd22 : 9'd45;
+	
 	wire [ 9: 0] HBLANK_START = 10'd58 + 10'd16 + 10'd640;
 	wire [ 9: 0] HBLANK_END = 10'd58 + 10'd16;
 	
@@ -49,7 +57,7 @@ module VE
 	bit          VSYNC;
 	bit          HBLK;
 	bit          VBLK;
-	always @(posedge VCLK or negedge VRST_N) begin		
+	always @(posedge VCLK or negedge VRST_N) begin
 		if (!VRST_N) begin
 			{HSTART,VSTART} <= '0;
 			LINE_BUF_RPOS <= '0;
@@ -66,28 +74,31 @@ module VE
 					
 				HCNT <= HCNT + 10'd1;
 				{HSTART,VSTART} <= '0;
-				if (HCNT == 10'd780 - 1) begin
+				if (HCNT == DOT_NUM - 1) begin
 					HSTART <= 1;
 					HCNT <= '0;
 					
 					VCNT <= VCNT + 9'd1;
-					if (VCNT == 9'd262 - 1) begin
+					if (VCNT == LINE_NUM - 2) begin
 						VSTART <= 1;
 					end
-					if (VCNT == 9'd263 - 1) begin
+					if (VCNT == LINE_NUM - 1) begin
 						VCNT <= '0;
-						VSYNC <= 1;
-					end
-					if (VCNT == 9'd3 - 1) begin
-						VSYNC <= 0;
 					end
 					
-					if (VCNT == 9'd22 + 9'd240 - 1) begin
+					if (VCNT == SCREEN_START + 9'd240 - 1) begin
 						VBLK <= 1;
 					end
-					if (VCNT == 9'd22 - 1) begin
+					if (VCNT == SCREEN_START - 1) begin
 						VBLK <= 0;
 					end
+				end
+				
+				if (HCNT == DOT_NUM - 1 && VCNT == LINE_NUM - 1) begin
+					VSYNC <= 1;
+				end
+				if (HCNT == (!PAL_SYNC[1] ? DOT_NUM : DOT_NUM/2) - 1 && VCNT == 9'd3 - 1) begin
+					VSYNC <= 0;
 				end
 				
 				if (HCNT == (DBG_HS_START - 10'd1)) begin
