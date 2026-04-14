@@ -84,7 +84,7 @@ module CLIO_VIDEO
 	wire FC = (VCOUNT == 9'd5);
 	wire VR = 0;
 	wire VD = PAL;
-	wire VL = (VCOUNT == 9'd262);
+	wire VL = (VCOUNT == !(PAL ? 9'd262 : 9'd312));
 	assign PCSC = |HSTART | (INFO[0] & VZ) | 
 	                        (INFO[1] & VN) | 
 									(INFO[2] & FN) | 

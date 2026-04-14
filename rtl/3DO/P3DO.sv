@@ -16,6 +16,8 @@ module P3DO
 	input              PAUSE,
 	input              DSP_PAUSE,
 	
+	input              PAL,
+	
 	input              CE_R,
 	input              CE_F,
 	
@@ -91,6 +93,8 @@ module P3DO
 	
 `ifdef DEBUG
 	                  ,
+	output reg [7: 0] DBG_CLK_DIV,
+	output reg [31: 0] DBG_CLK_CNT,
 	output reg         DBG_HOOK,
 	output reg [ 7: 0] DBG_HOOK2,
 	output reg [31: 0] DBG_B8E5C,DBG_B8E8C,DBG_B8D18,DBG_B8D9C,DBG_B8DA0,
@@ -192,6 +196,9 @@ module P3DO
 			DBG_HOOK2 <= '0;
 		end
 		else if (CE_R) begin
+			DBG_CLK_DIV <= DBG_CLK_DIV + 8'd1;
+			DBG_CLK_CNT <= DBG_CLK_CNT + 32'd1;
+			
 			if (CPU_A == 32'h000F39EC && CPU_DI == 32'hE58D0018 && !CPU_nRW && MCLK_PH2) DBG_HOOK2 <= DBG_HOOK2 + 1'd1;
 //			if (CPU_A == 32'h03300520                           &&  CPU_nRW && MCLK_PH2) DBG_HOOK2 <= DBG_HOOK2 + 1'd1;
 			
@@ -322,7 +329,7 @@ module P3DO
 		.RST_N(RST_N),
 		.EN(EN),
 		
-		.PAL(0),
+		.PAL(PAL),
 		
 		.CE_R(CE_R),
 		.CE_F(CE_F),
@@ -424,6 +431,8 @@ module P3DO
 		.VCLK(VCLK),
 		.RST_N(RST_N & RESET_N),
 		.EN(EN),
+		
+		.PAL(PAL),
 		
 		.VCE(VCE),
 		.AD(AD),

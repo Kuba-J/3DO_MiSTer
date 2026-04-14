@@ -83,7 +83,7 @@ module CLIO_XBUS
 			case (XBUS_ST)
 				XBUS_IDLE: begin
 					if (IO_WR_PEND) begin
-						case ({A[9:2],2'b00})
+						casex ({A[9:2],2'b00})
 							10'h000: begin XB_DIR <= XB_DIR | DI[9];
 						                  XB_DMAON <= XB_DMAON | DI[11];
 												XB_RESET <= XB_RESET | DI[15]; end
@@ -92,9 +92,18 @@ module CLIO_XBUS
 						                  XB_DMAON <= XB_DMAON & ~DI[11];
 						                  XB_RESET <= XB_RESET & ~DI[15]; end
 							10'h00C: begin XFERCNT <= DI; end
-							10'h100: begin XB_CPUHASXBUS <= 1; XBUS_ST <= XBUS_SEL; end
-							10'h140: begin XBUS_ST <= XBUS_WRPOLL; end
-							10'h180: begin XBUS_ST <= XBUS_WRCOM; end
+							10'h10x,
+							10'h11x,
+							10'h12x,
+							10'h13x: begin XB_CPUHASXBUS <= 1; XBUS_ST <= XBUS_SEL; end
+							10'h14x,
+							10'h15x,
+							10'h16x,
+							10'h17x: begin XBUS_ST <= XBUS_WRPOLL; end
+							10'h18x,
+							10'h19x,
+							10'h1Ax,
+							10'h1Bx: begin XBUS_ST <= XBUS_WRCOM; end
 							default:;
 						endcase
 						IO_WR_PEND <= 0;
@@ -102,13 +111,22 @@ module CLIO_XBUS
 						IS_DMA <= 0;
 					end
 					else if (IO_RD_PEND) begin
-						case ({A[9:2],2'b00})
+						casex ({A[9:2],2'b00})
 							10'h000,
 							10'h004: DO <= {24'h000000,XB_CPUHASXBUS,7'b000_0000};
 							10'h014: DO <= 32'h00004000;
-							10'h140: begin XBUS_ST <= XBUS_RDPOLL; end
-							10'h180: begin XBUS_ST <= XBUS_RDSTAT; end
-							10'h1C0: begin XBUS_ST <= XBUS_RDDATA; end
+							10'h14x,
+							10'h15x,
+							10'h16x,
+							10'h17x: begin XBUS_ST <= XBUS_RDPOLL; end
+							10'h18x,
+							10'h19x,
+							10'h1Ax,
+							10'h1Bx: begin XBUS_ST <= XBUS_RDSTAT; end
+							10'h1Cx,
+							10'h1Dx,
+							10'h1Ex,
+							10'h1Fx: begin XBUS_ST <= XBUS_RDDATA; end
 							default: DO <= '0;
 						endcase
 						IO_RD_PEND <= 0;
