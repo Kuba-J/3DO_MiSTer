@@ -160,35 +160,11 @@ module HPS2PAD (
 	
 	bit [255: 0] IN_DATA;
 	always_comb begin
-//		bit [7 : 0] STICK_OFFS,MOUSE_OFFS;
-//		
-//		case (PAD_SEL)
-//			3'h0: STICK_OFFS = 8'd0;
-//			3'h1: STICK_OFFS = 8'd16;
-//			3'h2: STICK_OFFS = 8'd32;
-//			3'h3: STICK_OFFS = 8'd48;
-//			default: STICK_OFFS = 8'd64;
-//		endcase
-//		MOUSE_OFFS = STICK_OFFS + 8'd72;
-//		
-//		if (PAD_SEL > 0) begin
-//			IN_DATA[15:0] = joy0_data;
-//		end
-//		if (PAD_SEL > 1) begin
-//			IN_DATA[31:16] = joy1_data;
-//		end
-//		if (PAD_SEL > 2) begin
-//			IN_DATA[47:32] = joy2_data;
-//		end
-//		if (PAD_SEL > 3) begin
-//			IN_DATA[63:48] = joy3_data;
-//		end
-		
 		case ({MOUSE_EN,STICK_EN,PAD_SEL})
 			5'b0_0_001: IN_DATA = {joy0_data,                                                     {256      -16{1'b1}}};
-			5'b0_0_011: IN_DATA = {joy0_data,joy1_data,                                           {256      -32{1'b1}}};
-			5'b0_0_100: IN_DATA = {joy0_data,joy1_data,joy2_data,                                 {256      -48{1'b1}}};
-			5'b0_0_101: IN_DATA = {joy0_data,joy1_data,joy2_data,joy3_data,                       {256      -64{1'b1}}};
+			5'b0_0_010: IN_DATA = {joy0_data,joy1_data,                                           {256      -32{1'b1}}};
+			5'b0_0_011: IN_DATA = {joy0_data,joy1_data,joy2_data,                                 {256      -48{1'b1}}};
+			5'b0_0_100: IN_DATA = {joy0_data,joy1_data,joy2_data,joy3_data,                       {256      -64{1'b1}}};
 			5'b0_1_000: IN_DATA = {                                        stick0_data,           {256-   72- 0{1'b1}}};
 			5'b0_1_001: IN_DATA = {joy0_data,                              stick1_data,           {256-   72-16{1'b1}}};
 			5'b1_0_000: IN_DATA = {                                                    mouse_data,{256-32-    0{1'b1}}};
