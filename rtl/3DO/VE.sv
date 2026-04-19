@@ -14,33 +14,24 @@ module VE
 	output             VSYNC_N,
 	
 	output     [23: 0] RGB,
-	output             HS_N,
-	output             VS_N,
-	output             HBLK_N,
-	output             VBLK_N,
-	output             DCLK,
+	output reg         HS_N,
+	output reg         VS_N,
+	output reg         HBLK_N,
+	output reg         VBLK_N,
+	output reg         DCLK,
 	
 	input      [ 7: 0] DBG_EXT,
 	input              DBG_BORD_DIS,
 	output     [ 9: 0] DBG_HS_START,DBG_HS_END
 );
 
-	bit          VRST_N;
+	bit  [ 1: 0] VRST_SYNC;
 	bit  [ 1: 0] PAL_SYNC;
 	always @(posedge VCLK) begin
-		VRST_N <= RST_N;
+		VRST_SYNC <= {VRST_SYNC[0],~RST_N};
 		PAL_SYNC <= {PAL_SYNC[0],PAL};
 	end 
-	
-	bit  [ 1: 0] DCLK_DIV;
-	always @(posedge VCLK or negedge VRST_N) begin
-		if (!VRST_N) begin
-			DCLK_DIV <= '0;
-		end
-		else begin
-			DCLK_DIV <= DCLK_DIV + 2'd1;
-		end
-	end 
+	wire VRST = VRST_SYNC[1];
 	
 	wire [ 8: 0] LINE_NUM = !PAL_SYNC[1] ? 9'd263 : 9'd313;
 	wire [ 9: 0] DOT_NUM = !PAL_SYNC[1] ? 10'd780 : 10'd784;//10'd942;
@@ -49,6 +40,7 @@ module VE
 	wire [ 9: 0] HBLANK_START = 10'd58 + 10'd16 + 10'd640;
 	wire [ 9: 0] HBLANK_END = 10'd58 + 10'd16;
 	
+	bit  [ 1: 0] DCLK_DIV;
 	bit  [ 9: 0] LINE_BUF_RPOS;
 	bit          HSTART,VSTART;
 	bit  [ 9: 0] HCNT;
@@ -57,8 +49,9 @@ module VE
 	bit          VSYNC;
 	bit          HBLK;
 	bit          VBLK;
-	always @(posedge VCLK or negedge VRST_N) begin
-		if (!VRST_N) begin
+	always @(posedge VCLK) begin		
+		if (VRST) begin
+			DCLK_DIV <= '0;
 			{HSTART,VSTART} <= '0;
 			LINE_BUF_RPOS <= '0;
 			HCNT <= '0;
@@ -69,6 +62,7 @@ module VE
 			DBG_HS_END <= 10'd11;
 		end
 		else begin
+			DCLK_DIV <= DCLK_DIV + 2'd1;
 			if (DCLK_DIV == 2'd3) begin
 				LINE_BUF_RPOS <= LINE_BUF_RPOS + 10'd1;
 					
@@ -116,13 +110,14 @@ module VE
 					LINE_BUF_RPOS <= '0;
 				end
 			end
+			
+			HS_N <= ~HSYNC;
+			VS_N <= ~VSYNC;
+			HBLK_N <= ~HBLK;
+			VBLK_N <= ~VBLK;
+			DCLK <= (DCLK_DIV == 2'd3);
 		end
 	end 
-	assign HS_N = ~HSYNC;
-	assign VS_N = ~VSYNC;
-	assign HBLK_N = ~HBLK;
-	assign VBLK_N = ~VBLK;
-	assign DCLK = (DCLK_DIV == 2'd3);
 	
 	
 	bit  [ 2: 0] HSTART_SYNC,VSTART_SYNC;
@@ -149,11 +144,11 @@ module VE
 			HSYNC2 <= 1;
 			VSYNC2 <= 1;
 		end
-		else if (EN) begin
+		else begin
 			if (VCE) begin
 				EMPTY_DE <= 0;
-				if (EMPTY_LINE && HCNT2 >= 10'd128 && HCNT2 < (10'd128+10'd640)) begin
-					LINE_BUF_WPOS <= HCNT2 - 10'd128;
+				if (EMPTY_LINE && HCNT2 >= 10'd96 && HCNT2 < (10'd96+10'd640)) begin
+					LINE_BUF_WPOS <= HCNT2 - 10'd96;
 					EMPTY_DE <= 1;
 				end
 				else if (DE) begin
@@ -204,7 +199,7 @@ module VE
 		.CLK0(MCLK),
 		.ADDR0({VCNT2[0],LINE_BUF_WPOS}),
 		.DATA0(AD),
-		.WREN0((DE | EMPTY_DE) & EN & VCE),
+		.WREN0((DE | EMPTY_DE) & VCE),
 		.Q0(),
 		
 		.CLK1(VCLK),

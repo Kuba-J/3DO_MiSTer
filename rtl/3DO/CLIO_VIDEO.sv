@@ -352,15 +352,17 @@ module CLIO_VIDEO
 		end
 	end 
 	
-	bit          CAPEND5_N,CAPEND6_N,CAPEND7_N;
+	bit          CAPEND5_N,CAPEND6_N,CAPEND7_N,CAPEND8_N,CAPEND9_N;
 	always @(posedge CLK or negedge RST_N) begin		
 		if (!RST_N) begin
-			{CAPEND5_N,CAPEND6_N,CAPEND7_N} <= '0;
+			{CAPEND5_N,CAPEND6_N,CAPEND7_N,CAPEND8_N,CAPEND9_N} <= '1;
 		end
 		else if (EN && VCE) begin
 			CAPEND5_N <= CAPEND4_N;
 			CAPEND6_N <= CAPEND5_N;
 			CAPEND7_N <= CAPEND6_N;
+			CAPEND8_N <= CAPEND7_N;
+			CAPEND9_N <= CAPEND8_N;
 		end
 	end 
 	
@@ -370,17 +372,18 @@ module CLIO_VIDEO
 			CAPEN_DIV <= 0;
 		end
 		else if (EN && VCE) begin
-			if (!READ_EN)
+			if (READ_START)
 				CAPEN_DIV <= 0;
-			else if (!CAPEND5_N)
+			else if (!CAPEND5_N || !CAPEND7_N)
 				CAPEN_DIV <= ~CAPEN_DIV;
 		end
 	end 
 	
-	wire PDS_CLK1 = ~CAPEND5_N & ~CAPEN_DIV;
-	wire PDS_CLK2 = ~CAPEND7_N &  CAPEN_DIV;
+	wire PDS_CLK1 = (~CAPEND5_N | ~CAPEND7_N) & ~CAPEN_DIV;
+	wire PDS_CLK2 = (~CAPEND7_N | ~CAPEND9_N) &  CAPEN_DIV;
 	bit  [23: 0] LP0,LP1,LP2,LP3;
-	CLIO_24DESTACKER PDESTACKER(CLK, VCE, EN, READ_START, PDS_CLK1, PDS_CLK2, RGB, LP0, LP1, LP2, LP3);
+	bit          PDESTACKER_DE;
+	CLIO_24DESTACKER PDESTACKER(CLK, VCE, EN, READ_START, PDS_CLK1, PDS_CLK2, RGB, ~CAPEND7_N, LP0, LP1, LP2, LP3, PDESTACKER_DE);
 	
 	bit  [23: 0] INTERPOL_OUT;
 	bit          INTERPOL_DE;
@@ -399,7 +402,7 @@ module CLIO_VIDEO
 		.LP1(LP1),
 		.LP2(LP2),
 		.LP3(LP3),
-		.DE_IN(~CAPEND7_N),
+		.DE_IN(PDESTACKER_DE),
 		
 		.OUT(INTERPOL_OUT),
 		.DE(INTERPOL_DE)
@@ -421,17 +424,21 @@ module CLIO_24DESTACKER (
 	input             CLK2,
 	
 	input     [23: 0] IN,
+	input             DE_IN,
 	output    [23: 0] LP0,
 	output    [23: 0] LP1,
 	output    [23: 0] LP2,
-	output    [23: 0] LP3
+	output    [23: 0] LP3,
+	output            DE_OUT
 );
 
-	reg [23:0] LATCH0,LATCH1,LATCH2,LATCH3,LATCH4;
+	bit [23: 0] LATCH0,LATCH1,LATCH2,LATCH3,LATCH4;
+	bit         DE_LATCH0,DE_LATCH1,DE_LATCH2,DE_LATCH3,DE_LATCH4,DE_LATCH5;
 	always @(posedge CLK) begin
 		if (EN && CE) begin
 			if (INIT) begin
 				{LATCH0,LATCH1,LATCH2,LATCH3,LATCH4} <= '0;
+				{DE_LATCH0,DE_LATCH1,DE_LATCH2,DE_LATCH3,DE_LATCH4,DE_LATCH5} <= '0;
 			end
 			
 			if (CLK1) begin
@@ -444,9 +451,17 @@ module CLIO_24DESTACKER (
 				LATCH0 <= LATCH1;
 				LATCH3 <= LATCH2;
 			end
+			
+			DE_LATCH0 <= DE_IN;
+			DE_LATCH1 <= DE_LATCH0;
+			DE_LATCH2 <= DE_LATCH1;
+			DE_LATCH3 <= DE_LATCH2;
+			DE_LATCH4 <= DE_LATCH3;
+			DE_LATCH5 <= DE_LATCH4;
 		end
 	end
 
 	assign {LP0,LP1,LP2,LP3} = {LATCH0,LATCH1,LATCH2,LATCH3};
+	assign DE_OUT = DE_LATCH5;
 
 endmodule
